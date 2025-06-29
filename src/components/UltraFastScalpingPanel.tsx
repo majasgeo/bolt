@@ -31,6 +31,7 @@ export function UltraFastScalpingPanel({
   };
 
   const handleRunTest = () => {
+    console.log("Running UltraFast Scalping with config:", config);
     onRunUltraFastBacktest(config);
   };
 
