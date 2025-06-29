@@ -38,12 +38,15 @@ export function BollingerFibonacciHybridPanel({
   };
 
   const isStrategyEnabled = config.enableLongPositions || config.enableShortPositions;
+  
+  // Detect if we're working with seconds data
+  const isSecondsTimeframe = config.maxHoldingMinutes < 1;
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
       <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center">
         <Layers className="mr-2 h-6 w-6 text-indigo-600" />
-        Bollinger + Fibonacci Hybrid (1-Min Scalping)
+        Bollinger + Fibonacci Hybrid {isSecondsTimeframe ? '(Seconds Scalping)' : '(1-Min Scalping)'}
       </h3>
 
       <div className="space-y-6">
@@ -54,8 +57,8 @@ export function BollingerFibonacciHybridPanel({
             <p>• <strong>Step 1:</strong> Bollinger Band breakout for momentum detection</p>
             <p>• <strong>Step 2:</strong> Fibonacci retracement to golden zone for precision entry</p>
             <p>• <strong>Step 3:</strong> Volume + momentum confirmation for high-probability trades</p>
-            <p>• <strong>Target:</strong> 1.2% profit with 0.8% stop loss (1.5:1 R/R ratio)</p>
-            <p>• <strong>Timeframe:</strong> Optimized for 1-minute chart scalping</p>
+            <p>• <strong>Target:</strong> {(config.profitTarget * 100).toFixed(1)}% profit with {(config.stopLossPercent * 100).toFixed(1)}% stop loss ({(config.profitTarget / config.stopLossPercent).toFixed(1)}:1 R/R ratio)</p>
+            <p>• <strong>Timeframe:</strong> Optimized for {isSecondsTimeframe ? 'seconds' : '1-minute'} chart scalping</p>
           </div>
         </div>
 
@@ -100,9 +103,12 @@ export function BollingerFibonacciHybridPanel({
                 value={config.period}
                 onChange={(e) => handleChange('period', parseInt(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                min="10" max="30"
+                min={isSecondsTimeframe ? "3" : "10"} 
+                max={isSecondsTimeframe ? "15" : "30"}
               />
-              <p className="text-xs text-gray-500 mt-1">Recommended: 15-20 for 1-minute scalping</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Recommended: {isSecondsTimeframe ? '3-8 for seconds data' : '15-20 for 1-minute scalping'}
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Standard Deviation</label>
@@ -122,7 +128,7 @@ export function BollingerFibonacciHybridPanel({
                 value={config.offset}
                 onChange={(e) => handleChange('offset', parseInt(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                min="0" max="10"
+                min="0" max={isSecondsTimeframe ? "5" : "10"}
               />
             </div>
           </div>
@@ -136,7 +142,8 @@ export function BollingerFibonacciHybridPanel({
                 value={config.swingLookback}
                 onChange={(e) => handleChange('swingLookback', parseInt(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                min="3" max="8"
+                min={isSecondsTimeframe ? "2" : "3"} 
+                max={isSecondsTimeframe ? "6" : "8"}
               />
               <p className="text-xs text-gray-500 mt-1">Candles to look back for swing points</p>
             </div>
@@ -216,7 +223,7 @@ export function BollingerFibonacciHybridPanel({
         <div className="bg-green-50 rounded-lg p-4">
           <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
             <Target className="h-5 w-5 mr-2 text-green-600" />
-            Risk Management (1-Minute Scalping)
+            Risk Management ({isSecondsTimeframe ? 'Seconds' : '1-Minute'} Scalping)
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -227,7 +234,8 @@ export function BollingerFibonacciHybridPanel({
                 value={config.profitTarget * 100}
                 onChange={(e) => handleChange('profitTarget', parseFloat(e.target.value) / 100)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                min="0.5" max="2"
+                min={isSecondsTimeframe ? "0.1" : "0.5"} 
+                max="2"
               />
               <p className="text-xs text-gray-500 mt-1">Current: {(config.profitTarget * 100).toFixed(1)}%</p>
             </div>
@@ -239,19 +247,26 @@ export function BollingerFibonacciHybridPanel({
                 value={config.stopLossPercent * 100}
                 onChange={(e) => handleChange('stopLossPercent', parseFloat(e.target.value) / 100)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                min="0.3" max="1.5"
+                min={isSecondsTimeframe ? "0.05" : "0.3"} 
+                max="1.5"
               />
               <p className="text-xs text-gray-500 mt-1">Current: {(config.stopLossPercent * 100).toFixed(1)}%</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Max Hold Time (Minutes)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Max Hold Time ({isSecondsTimeframe ? 'Seconds' : 'Minutes'})
+              </label>
               <input
                 type="number"
                 value={config.maxHoldingMinutes}
                 onChange={(e) => handleChange('maxHoldingMinutes', parseInt(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                min="2" max="15"
+                min={isSecondsTimeframe ? "5" : "2"} 
+                max={isSecondsTimeframe ? "60" : "15"}
               />
+              <p className="text-xs text-gray-500 mt-1">
+                {isSecondsTimeframe ? 'For seconds data, this is in seconds' : 'Maximum minutes to hold a trade'}
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Leverage</label>
@@ -334,8 +349,8 @@ export function BollingerFibonacciHybridPanel({
             <p>• <strong>Entry:</strong> BB breakout followed by pullback to Fibonacci golden zone (50%-61.8%)</p>
             <p>• <strong>Confirmation:</strong> Volume spike + momentum confirmation for high-probability setups</p>
             <p>• <strong>Exit:</strong> Profit target ({(config.profitTarget * 100).toFixed(1)}%), stop loss ({(config.stopLossPercent * 100).toFixed(1)}%), or signal reversal</p>
-            <p>• <strong>Time Limit:</strong> Maximum {config.maxHoldingMinutes} minutes per trade</p>
-            <p>• <strong>Advantage:</strong> Combines momentum detection with precision entry for optimal 1-minute scalping</p>
+            <p>• <strong>Time Limit:</strong> Maximum {config.maxHoldingMinutes} {isSecondsTimeframe ? 'seconds' : 'minutes'} per trade</p>
+            <p>• <strong>Advantage:</strong> Combines momentum detection with precision entry for optimal {isSecondsTimeframe ? 'seconds' : '1-minute'} scalping</p>
           </div>
         </div>
       </div>

@@ -336,7 +336,10 @@ export class StrategyOptimizer {
   }
 
   private formatDuration(days: number): string {
-    if (days < 1) {
+    if (days < 0.01) { // Less than ~15 minutes
+      const minutes = Math.round(days * 24 * 60);
+      return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    } else if (days < 1) {
       const hours = Math.round(days * 24);
       return `${hours} hour${hours !== 1 ? 's' : ''}`;
     } else if (days < 30) {
