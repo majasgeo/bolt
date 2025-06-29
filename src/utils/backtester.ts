@@ -7,6 +7,7 @@ export class Backtester {
   private currentTrade: Trade | null = null;
   private lastCandleUnderUpperBand = -1;
   private lastCandleOverLowerBand = -1;
+  private isSecondsTimeframe: boolean = false;
 
   constructor(config: TradingConfig) {
     this.config = config;
@@ -19,6 +20,10 @@ export class Backtester {
     this.currentTrade = null;
     this.lastCandleUnderUpperBand = -1;
     this.lastCandleOverLowerBand = -1;
+    
+    // Detect if we're working with seconds data
+    this.isSecondsTimeframe = this.detectSecondsTimeframe(candles);
+    console.log(`Backtester detected ${this.isSecondsTimeframe ? 'seconds' : 'minute/hour'} timeframe data`);
 
     for (let i = 1; i < candles.length; i++) {
       const candle = candles[i];
@@ -100,6 +105,21 @@ export class Backtester {
     }
 
     return this.calculateResults();
+  }
+  
+  private detectSecondsTimeframe(candles: Candle[]): boolean {
+    if (candles.length < 2) return false;
+    
+    // Calculate average time difference between candles
+    let totalDiff = 0;
+    const sampleSize = Math.min(20, candles.length - 1);
+    
+    for (let i = 1; i <= sampleSize; i++) {
+      totalDiff += candles[i].timestamp - candles[i-1].timestamp;
+    }
+    
+    const avgDiff = totalDiff / sampleSize;
+    return avgDiff < 60000; // Less than 60 seconds = seconds timeframe
   }
 
   private enterLongPosition(candle: Candle, index: number, candles: Candle[]) {
@@ -210,11 +230,17 @@ export class Backtester {
       maxDrawdown = Math.max(maxDrawdown, drawdown);
     }
 
-    // Simple Sharpe ratio calculation
+    // Simple Sharpe ratio calculation with timeframe adjustment
     const returns = this.trades.map(t => (t.pnl || 0) / this.config.initialCapital);
     const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length || 0;
     const returnVariance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length || 1;
-    const sharpeRatio = avgReturn / Math.sqrt(returnVariance) * Math.sqrt(252); // Annualized
+    
+    // Adjust annualization factor based on timeframe
+    const annualizationFactor = this.isSecondsTimeframe ? 
+      252 * 24 * 60 * 60 : // For seconds data
+      252; // For daily data
+      
+    const sharpeRatio = avgReturn / Math.sqrt(returnVariance) * Math.sqrt(annualizationFactor);
 
     return {
       totalTrades: this.trades.length,

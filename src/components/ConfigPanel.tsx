@@ -19,9 +19,21 @@ export function ConfigPanel({ config, onConfigChange, onRunBacktest, isRunning }
 
   const isStrategyEnabled = config.enableLongPositions || config.enableShortPositions;
 
+  // Detect if we're likely working with seconds data based on period
+  const isLikelySecondsData = config.period < 10;
+
   // Get timeframe-specific recommendations
   const getRecommendations = () => {
-    if (config.period <= 15) {
+    if (isLikelySecondsData) {
+      return {
+        timeframe: "1-second to 5-second",
+        periodRange: "3-8",
+        stdDevRange: "1.5-2.0",
+        offsetRange: "0-2",
+        leverageRange: "5-20x",
+        warning: "Seconds timeframes require very tight parameters and quick reactions"
+      };
+    } else if (config.period <= 15) {
       return {
         timeframe: "1-5 minute",
         periodRange: "5-15",
@@ -70,7 +82,7 @@ export function ConfigPanel({ config, onConfigChange, onRunBacktest, isRunning }
             <p>• <strong>Recommended Offset:</strong> {recommendations.offsetRange}</p>
             <p>• <strong>Recommended Leverage:</strong> {recommendations.leverageRange}</p>
           </div>
-          {config.period <= 15 && (
+          {(config.period <= 15 || isLikelySecondsData) && (
             <div className="mt-2 flex items-start">
               <AlertTriangle className="h-4 w-4 text-orange-600 mr-2 mt-0.5" />
               <p className="text-sm text-orange-700">{recommendations.warning}</p>
@@ -119,8 +131,8 @@ export function ConfigPanel({ config, onConfigChange, onRunBacktest, isRunning }
               value={config.period}
               onChange={(e) => handleChange('period', parseInt(e.target.value))}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              min="5"
-              max="100"
+              min={isLikelySecondsData ? "2" : "5"}
+              max={isLikelySecondsData ? "20" : "100"}
             />
             <p className="text-xs text-gray-500 mt-1">
               Current: {config.period} (Recommended: {recommendations.periodRange})
@@ -155,7 +167,7 @@ export function ConfigPanel({ config, onConfigChange, onRunBacktest, isRunning }
               onChange={(e) => handleChange('offset', parseInt(e.target.value))}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               min="0"
-              max="50"
+              max={isLikelySecondsData ? "10" : "50"}
             />
             <p className="text-xs text-gray-500 mt-1">
               Current: {config.offset} (Recommended: {recommendations.offsetRange})
