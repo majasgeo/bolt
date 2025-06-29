@@ -39,10 +39,17 @@ export function parseCSVToCandles(csvContent: string): CSVParseResult {
     const headers = Object.keys(rows[0]);
     const columnMap = detectColumnMapping(headers);
 
-    if (!columnMap.timestamp || !columnMap.close) {
+    if (!columnMap.timestamp && !columnMap.date && !columnMap.time) {
       return {
         success: false,
-        error: 'Required columns not found. CSV must contain timestamp/date and close price columns.'
+        error: 'Required timestamp/date column not found. CSV must contain timestamp, date, or time column.'
+      };
+    }
+
+    if (!columnMap.close && !columnMap.price) {
+      return {
+        success: false,
+        error: 'Required close price column not found. CSV must contain close or price column.'
       };
     }
 
@@ -72,6 +79,11 @@ export function parseCSVToCandles(csvContent: string): CSVParseResult {
     // Sort by timestamp
     candles.sort((a, b) => a.timestamp - b.timestamp);
 
+    // Log timeframe detection for debugging
+    const timeframe = detectTimeframe(candles);
+    console.log(`Detected timeframe: ${timeframe}`);
+    console.log(`Parsed ${candles.length} candles from CSV`);
+
     return {
       success: true,
       data: candles,
@@ -88,27 +100,43 @@ export function parseCSVToCandles(csvContent: string): CSVParseResult {
 
 interface ColumnMapping {
   timestamp?: string;
+  date?: string;
+  time?: string;
   open?: string;
   high?: string;
   low?: string;
-  close: string;
+  close?: string;
+  price?: string;
   volume?: string;
 }
 
 function detectColumnMapping(headers: string[]): ColumnMapping {
-  const mapping: ColumnMapping = { close: '' };
+  const mapping: ColumnMapping = {};
 
   for (const header of headers) {
-    const normalized = header.toLowerCase().replace(/[^a-z]/g, '');
+    const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, '');
     
     // Timestamp/Date detection
     if (!mapping.timestamp && (
       normalized.includes('time') || 
-      normalized.includes('date') || 
       normalized === 'timestamp' ||
       normalized === 'datetime'
     )) {
       mapping.timestamp = header;
+    }
+    
+    if (!mapping.date && (
+      normalized === 'date' ||
+      normalized.includes('date')
+    )) {
+      mapping.date = header;
+    }
+    
+    if (!mapping.time && (
+      normalized === 'time' ||
+      normalized.includes('time') && !normalized.includes('timestamp')
+    )) {
+      mapping.time = header;
     }
     
     // OHLC detection
@@ -158,21 +186,47 @@ function parseRowToCandle(row: CSVRow, mapping: ColumnMapping, rowNumber: number
       }
       timestamp = date.getTime();
     }
+  } else if (mapping.date && mapping.time) {
+    // Combine date and time
+    const dateValue = row[mapping.date];
+    const timeValue = row[mapping.time];
+    if (!dateValue || !timeValue) throw new Error('Missing date or time');
+    
+    const dateTime = new Date(`${dateValue} ${timeValue}`);
+    if (isNaN(dateTime.getTime())) {
+      throw new Error(`Invalid date/time format: ${dateValue} ${timeValue}`);
+    }
+    timestamp = dateTime.getTime();
+  } else if (mapping.date) {
+    // Date only
+    const dateValue = row[mapping.date];
+    if (!dateValue) throw new Error('Missing date');
+    
+    const date = new Date(dateValue);
+    if (isNaN(date.getTime())) {
+      throw new Error(`Invalid date format: ${dateValue}`);
+    }
+    timestamp = date.getTime();
   } else {
     // Use row index as timestamp if no timestamp column
     timestamp = Date.now() - (1000 * 60 * 60 * rowNumber); // Hourly intervals going backwards
   }
 
   // Parse prices
-  const close = parseFloat(row[mapping.close]);
+  const closeField = mapping.close || mapping.price;
+  if (!closeField || !row[closeField]) {
+    throw new Error('Missing close/price value');
+  }
+  
+  const close = parseFloat(row[closeField]);
   if (isNaN(close) || close <= 0) {
-    throw new Error(`Invalid close price: ${row[mapping.close]}`);
+    throw new Error(`Invalid close price: ${row[closeField]}`);
   }
 
-  const open = mapping.open ? parseFloat(row[mapping.open]) : close;
-  const high = mapping.high ? parseFloat(row[mapping.high]) : close;
-  const low = mapping.low ? parseFloat(row[mapping.low]) : close;
-  const volume = mapping.volume ? parseFloat(row[mapping.volume]) : Math.random() * 1000 + 500;
+  const open = mapping.open && row[mapping.open] ? parseFloat(row[mapping.open]) : close;
+  const high = mapping.high && row[mapping.high] ? parseFloat(row[mapping.high]) : Math.max(open, close);
+  const low = mapping.low && row[mapping.low] ? parseFloat(row[mapping.low]) : Math.min(open, close);
+  const volume = mapping.volume && row[mapping.volume] ? parseFloat(row[mapping.volume]) : Math.random() * 1000 + 500;
 
   // Validate OHLC relationships
   const maxPrice = Math.max(open, close);
@@ -186,6 +240,31 @@ function parseRowToCandle(row: CSVRow, mapping: ColumnMapping, rowNumber: number
     close,
     volume: isNaN(volume) ? Math.random() * 1000 + 500 : volume
   };
+}
+
+function detectTimeframe(candles: Candle[]): string {
+  if (candles.length < 2) return 'Unknown';
+  
+  const timeDiffs = [];
+  for (let i = 1; i < Math.min(10, candles.length); i++) {
+    timeDiffs.push(candles[i].timestamp - candles[i-1].timestamp);
+  }
+  
+  const avgDiff = timeDiffs.reduce((sum, diff) => sum + diff, 0) / timeDiffs.length;
+  const seconds = avgDiff / 1000;
+  
+  if (seconds <= 1.5) return '1-second';
+  if (seconds <= 5.5) return '5-second';
+  if (seconds <= 15.5) return '15-second';
+  if (seconds <= 30.5) return '30-second';
+  if (seconds <= 65) return '1-minute';
+  if (seconds <= 300.5) return '5-minute';
+  if (seconds <= 900.5) return '15-minute';
+  if (seconds <= 1830) return '30-minute';
+  if (seconds <= 3650) return '1-hour';
+  if (seconds <= 14400) return '4-hour';
+  if (seconds <= 86500) return '1-day';
+  return `${Math.round(seconds)}-second`;
 }
 
 export function generateSampleCSV(secondsTimeframe: boolean = false): string {
