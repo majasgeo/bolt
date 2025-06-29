@@ -489,11 +489,20 @@ export class UltraFastScalpingBot {
       maxDrawdown = Math.max(maxDrawdown, drawdown);
     }
 
+    // Detect if we're working with seconds data
+    const isSecondsData = avgTradeDurationSeconds < 60;
+    
     // Ultra-fast Sharpe ratio (adjusted for high-frequency trading)
     const returns = this.trades.map(t => (t.pnl || 0) / this.config.initialCapital);
     const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length || 0;
     const returnVariance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length || 1;
-    const sharpeRatio = avgReturn / Math.sqrt(returnVariance) * Math.sqrt(252 * 24 * 60); // Annualized for 1-minute
+    
+    // Adjust annualization factor based on timeframe
+    const annualizationFactor = isSecondsData ? 
+      252 * 24 * 60 * 60 : // Seconds data
+      252 * 24 * 60;       // Minute data
+      
+    const sharpeRatio = avgReturn / Math.sqrt(returnVariance) * Math.sqrt(annualizationFactor);
 
     return {
       totalTrades: this.trades.length,
@@ -516,12 +525,15 @@ export class UltraFastScalpingBot {
 
 // Helper function to create ultra-fast config
 export function createUltraFastConfig(basicConfig: TradingConfig): UltraFastScalpingConfig {
+  // Detect if we're likely working with seconds data based on period
+  const isLikelySecondsData = basicConfig.period < 10;
+  
   return {
     ...basicConfig,
     // Ultra-fast scalping settings (AGGRESSIVE)
-    maxHoldingSeconds: 30, // Maximum 30 seconds per trade
-    quickProfitTarget: 0.002, // 0.2% profit target
-    tightStopLoss: 0.001, // 0.1% stop loss
+    maxHoldingSeconds: isLikelySecondsData ? 15 : 30, // 15 seconds for seconds data, 30 for minute
+    quickProfitTarget: isLikelySecondsData ? 0.001 : 0.002, // 0.1% for seconds, 0.2% for minute
+    tightStopLoss: isLikelySecondsData ? 0.0005 : 0.001, // 0.05% for seconds, 0.1% for minute
     
     // Speed optimizations
     enableInstantEntry: true,
@@ -530,8 +542,8 @@ export function createUltraFastConfig(basicConfig: TradingConfig): UltraFastScal
     
     // 1-minute specific
     enableTickConfirmation: true,
-    minPriceMovement: 0.0005, // 0.05% minimum movement
-    maxSlippage: 0.0002, // 0.02% slippage
+    minPriceMovement: isLikelySecondsData ? 0.0002 : 0.0005, // Smaller for seconds
+    maxSlippage: isLikelySecondsData ? 0.0001 : 0.0002, // Smaller for seconds
     
     // Ultra-aggressive
     enableScalpMode: true,
@@ -540,10 +552,10 @@ export function createUltraFastConfig(basicConfig: TradingConfig): UltraFastScal
     
     // Speed filters
     enableVelocityFilter: true,
-    velocityThreshold: 0.001, // 0.1% per minute velocity
+    velocityThreshold: isLikelySecondsData ? 0.0005 : 0.001, // Smaller for seconds
     
     // Micro-timeframe
     enableSubMinuteAnalysis: true,
-    subMinutePeriods: 3 // Analyze last 3 candles
+    subMinutePeriods: isLikelySecondsData ? 5 : 3 // More periods for seconds
   };
 }

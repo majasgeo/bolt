@@ -39,11 +39,14 @@ export function FibonacciScalpingPanel({ config, onConfigChange, onRunFibonacci,
 
   const isStrategyEnabled = config.enableLongPositions || config.enableShortPositions;
 
+  // Detect if we're working with seconds data
+  const isSecondsTimeframe = config.maxHoldingMinutes < 1;
+
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
       <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center">
         <BarChart3 className="mr-2 h-6 w-6 text-purple-600" />
-        Fibonacci Scalping Bot (1-Min Chart)
+        Fibonacci Scalping Bot {isSecondsTimeframe ? '(Seconds Chart)' : '(1-Min Chart)'}
       </h3>
 
       <div className="space-y-6">
@@ -54,7 +57,7 @@ export function FibonacciScalpingPanel({ config, onConfigChange, onRunFibonacci,
             <p>• <strong>No Indicators:</strong> Pure price action and Fibonacci retracement</p>
             <p>• <strong>Golden Zone:</strong> 50% - 61.8% Fibonacci levels</p>
             <p>• <strong>Structure Breaks:</strong> Break of swing highs/lows</p>
-            <p>• <strong>Quick Scalps:</strong> 2-15 minute trades targeting 1.5%</p>
+            <p>• <strong>Quick Scalps:</strong> {isSecondsTimeframe ? 'Seconds' : '2-15 minute'} trades targeting {(config.profitTarget * 100).toFixed(1)}%</p>
             <p>• <strong>Risk/Reward:</strong> {config.riskRewardRatio.toFixed(2)}:1 ratio</p>
           </div>
         </div>
@@ -151,7 +154,8 @@ export function FibonacciScalpingPanel({ config, onConfigChange, onRunFibonacci,
                 value={config.minSwingSize * 100}
                 onChange={(e) => handleChange('minSwingSize', parseFloat(e.target.value) / 100)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                min="0.5" max="3"
+                min={isSecondsTimeframe ? "0.1" : "0.5"} 
+                max="3"
               />
               <p className="text-xs text-gray-500 mt-1">Current: {(config.minSwingSize * 100).toFixed(1)}%</p>
             </div>
@@ -162,7 +166,7 @@ export function FibonacciScalpingPanel({ config, onConfigChange, onRunFibonacci,
         <div className="bg-blue-50 rounded-lg p-4">
           <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
             <Target className="h-5 w-5 mr-2 text-blue-600" />
-            Risk Management (Scalping Optimized)
+            Risk Management ({isSecondsTimeframe ? 'Seconds' : 'Minute'} Optimized)
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -173,7 +177,8 @@ export function FibonacciScalpingPanel({ config, onConfigChange, onRunFibonacci,
                 value={config.profitTarget * 100}
                 onChange={(e) => handleChange('profitTarget', parseFloat(e.target.value) / 100)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                min="0.5" max="3"
+                min={isSecondsTimeframe ? "0.1" : "0.5"} 
+                max="3"
               />
               <p className="text-xs text-gray-500 mt-1">Current: {(config.profitTarget * 100).toFixed(1)}%</p>
             </div>
@@ -185,19 +190,26 @@ export function FibonacciScalpingPanel({ config, onConfigChange, onRunFibonacci,
                 value={config.stopLossPercent * 100}
                 onChange={(e) => handleChange('stopLossPercent', parseFloat(e.target.value) / 100)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                min="0.3" max="2"
+                min={isSecondsTimeframe ? "0.05" : "0.3"} 
+                max="2"
               />
               <p className="text-xs text-gray-500 mt-1">Current: {(config.stopLossPercent * 100).toFixed(1)}%</p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Max Hold Time (Minutes)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Max Hold Time ({isSecondsTimeframe ? 'Seconds' : 'Minutes'})
+              </label>
               <input
                 type="number"
                 value={config.maxHoldingMinutes}
                 onChange={(e) => handleChange('maxHoldingMinutes', parseInt(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                min="2" max="30"
+                min={isSecondsTimeframe ? "1" : "2"} 
+                max={isSecondsTimeframe ? "60" : "30"}
               />
+              <p className="text-xs text-gray-500 mt-1">
+                {isSecondsTimeframe ? 'For seconds data, this is in seconds' : 'Maximum minutes to hold a trade'}
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Leverage</label>
@@ -300,8 +312,8 @@ export function FibonacciScalpingPanel({ config, onConfigChange, onRunFibonacci,
             <p>• <strong>Entry:</strong> Price pullback to golden zone (50%-61.8%) after structure break</p>
             <p>• <strong>Confirmation:</strong> Volume spike + candle color + Fibonacci respect</p>
             <p>• <strong>Exit:</strong> Profit target ({(config.profitTarget * 100).toFixed(1)}%), stop loss ({(config.stopLossPercent * 100).toFixed(1)}%), or previous swing level</p>
-            <p>• <strong>Time Limit:</strong> Maximum {config.maxHoldingMinutes} minutes per trade</p>
-            <p>• <strong>Expectancy:</strong> Quick 1-2% moves with {config.riskRewardRatio.toFixed(1)}:1 risk/reward</p>
+            <p>• <strong>Time Limit:</strong> Maximum {config.maxHoldingMinutes} {isSecondsTimeframe ? 'seconds' : 'minutes'} per trade</p>
+            <p>• <strong>Expectancy:</strong> Quick {isSecondsTimeframe ? 'micro' : '1-2%'} moves with {config.riskRewardRatio.toFixed(1)}:1 risk/reward</p>
           </div>
         </div>
       </div>

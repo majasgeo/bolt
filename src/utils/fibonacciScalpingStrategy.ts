@@ -56,6 +56,7 @@ export class FibonacciScalpingBot {
   private currentTrade: Trade | null = null;
   private swingPoints: SwingPoint[] = [];
   private currentFibRetracement: FibonacciRetracement | null = null;
+  private isSecondsTimeframe: boolean = false;
 
   constructor(config: FibonacciScalpingConfig) {
     this.config = config;
@@ -68,6 +69,10 @@ export class FibonacciScalpingBot {
     this.currentTrade = null;
     this.swingPoints = [];
     this.currentFibRetracement = null;
+    
+    // Detect if we're working with seconds data
+    this.isSecondsTimeframe = this.detectSecondsTimeframe(candles);
+    console.log(`FibonacciScalpingBot detected ${this.isSecondsTimeframe ? 'seconds' : 'minute/hour'} timeframe data`);
 
     // Calculate volume moving average for confirmation
     const volumeMA = this.calculateVolumeMA(candles, 20);
@@ -118,6 +123,21 @@ export class FibonacciScalpingBot {
     }
 
     return this.calculateResults();
+  }
+  
+  private detectSecondsTimeframe(candles: Candle[]): boolean {
+    if (candles.length < 2) return false;
+    
+    // Calculate average time difference between candles
+    let totalDiff = 0;
+    const sampleSize = Math.min(20, candles.length - 1);
+    
+    for (let i = 1; i <= sampleSize; i++) {
+      totalDiff += candles[i].timestamp - candles[i-1].timestamp;
+    }
+    
+    const avgDiff = totalDiff / sampleSize;
+    return avgDiff < 60000; // Less than 60 seconds = seconds timeframe
   }
 
   // Initialize swing points to prevent null errors
@@ -401,9 +421,17 @@ export class FibonacciScalpingBot {
     const entryIndex = candles.findIndex(c => c && c.timestamp >= this.currentTrade!.entryTime);
     if (entryIndex === -1) return false;
 
+    // For seconds data, convert minutes to candle count appropriately
+    let maxHoldingCandles = this.config.maxHoldingMinutes;
+    
+    if (this.isSecondsTimeframe) {
+      // For seconds data, convert minutes to seconds
+      maxHoldingCandles = this.config.maxHoldingMinutes * 60;
+    }
+
     // Close position if held for maximum time (scalping should be quick)
-    const minutesHeld = index - entryIndex;
-    return minutesHeld >= this.config.maxHoldingMinutes;
+    const candlesHeld = index - entryIndex;
+    return candlesHeld >= maxHoldingCandles;
   }
 
   private enterLongPosition(candle: Candle, index: number) {
@@ -524,7 +552,10 @@ export class FibonacciScalpingBot {
     const returns = this.trades.map(t => (t.pnl || 0) / this.config.initialCapital);
     const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length || 0;
     const returnVariance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length || 1;
-    const sharpeRatio = avgReturn / Math.sqrt(returnVariance) * Math.sqrt(252 * 24 * 60); // Annualized for 1-minute data
+    
+    // Adjust annualization factor based on timeframe
+    const annualizationFactor = this.isSecondsTimeframe ? 252 * 24 * 60 * 60 : 252 * 24 * 60; // Seconds or minutes
+    const sharpeRatio = avgReturn / Math.sqrt(returnVariance) * Math.sqrt(annualizationFactor);
 
     return {
       totalTrades: this.trades.length,

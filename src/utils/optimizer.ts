@@ -40,11 +40,17 @@ export class StrategyOptimizer {
     
     // Parameter ranges - adjust based on timeframe
     const smaRange = this.isSecondsData 
-      ? Array.from({ length: 19 }, (_, i) => i + 2) // SMA 2 to 20 for seconds data
+      ? [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20] // Smaller SMA range for seconds data
       : Array.from({ length: 49 }, (_, i) => i + 2); // SMA 2 to 50 for minute/hour data
       
-    const stdDevValues = [1, 1.5, 2, 2.5, 3]; // Common standard deviation values
-    const offsetValues = [0, 5, 10, 15, 20]; // Common offset values
+    const stdDevValues = this.isSecondsData
+      ? [1, 1.5, 2, 2.5] // Fewer StdDev values for seconds
+      : [1, 1.5, 2, 2.5, 3]; // Common standard deviation values
+      
+    const offsetValues = this.isSecondsData
+      ? [0, 2, 5] // Smaller offsets for seconds
+      : [0, 5, 10, 15, 20]; // Common offset values
+      
     const leverageValues = [2, 3, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 125]; // Leverage range
     
     const totalCombinations = smaRange.length * stdDevValues.length * offsetValues.length * leverageValues.length;
@@ -121,8 +127,8 @@ export class StrategyOptimizer {
                   stdDev,
                   offset,
                   leverage,
-                  totalReturn, // ✅ CRITICAL: This is the correct total return
-                  totalPnL: backtestResult.totalPnL, // ✅ CRITICAL: This is the correct P&L
+                  totalReturn,
+                  totalPnL: backtestResult.totalPnL,
                   winRate: backtestResult.winRate,
                   totalTrades: backtestResult.totalTrades,
                   maxDrawdown: backtestResult.maxDrawdown,
@@ -313,11 +319,6 @@ export class StrategyOptimizer {
     );
 
     return score;
-  }
-
-  private getBestResult(results: OptimizationResult[]): OptimizationResult | undefined {
-    if (results.length === 0) return undefined;
-    return results.reduce((best, current) => current.score > best.score ? current : best);
   }
 
   private formatTimeRemaining(milliseconds: number): string {

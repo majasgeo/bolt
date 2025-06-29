@@ -14,6 +14,9 @@ export function OptimizationResults({ results, onSelectConfiguration }: Optimiza
   const [timeFilter, setTimeFilter] = useState<number>(0);
   const [viewMode, setViewMode] = useState<'overall' | 'profit' | 'efficiency'>('overall');
 
+  // Detect if we're working with seconds data
+  const isSecondsData = results.length > 0 && results[0].tradingPeriodDays && results[0].tradingPeriodDays < 0.01;
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -28,7 +31,10 @@ export function OptimizationResults({ results, onSelectConfiguration }: Optimiza
 
   const formatDuration = (days?: number) => {
     if (!days) return 'N/A';
-    if (days < 1) {
+    if (days < 0.01) { // Less than ~15 minutes
+      const minutes = Math.round(days * 24 * 60);
+      return `${minutes}m`;
+    } else if (days < 1) {
       const hours = Math.round(days * 24);
       return `${hours}h`;
     } else if (days < 30) {
@@ -130,22 +136,33 @@ export function OptimizationResults({ results, onSelectConfiguration }: Optimiza
     return null;
   }
 
-  const timeFilterOptions = [
-    { value: 0, label: 'All Results' },
-    { value: 1, label: '1+ Day' },
-    { value: 7, label: '1+ Week' },
-    { value: 30, label: '1+ Month' },
-    { value: 90, label: '3+ Months' },
-    { value: 180, label: '6+ Months' },
-    { value: 365, label: '1+ Year' }
-  ];
+  // Adjust time filter options based on data timeframe
+  const timeFilterOptions = isSecondsData ? 
+    [
+      { value: 0, label: 'All Results' },
+      { value: 0.001, label: '1+ Minute' },
+      { value: 0.01, label: '15+ Minutes' },
+      { value: 0.042, label: '1+ Hour' },
+      { value: 0.25, label: '6+ Hours' },
+      { value: 0.5, label: '12+ Hours' },
+      { value: 1, label: '1+ Day' }
+    ] : 
+    [
+      { value: 0, label: 'All Results' },
+      { value: 1, label: '1+ Day' },
+      { value: 7, label: '1+ Week' },
+      { value: 30, label: '1+ Month' },
+      { value: 90, label: '3+ Months' },
+      { value: 180, label: '6+ Months' },
+      { value: 365, label: '1+ Year' }
+    ];
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-xl font-bold text-gray-900 flex items-center">
           {currentIcon}
-          <span className="ml-2">Optimization Results</span>
+          <span className="ml-2">Optimization Results {isSecondsData ? '(Seconds Data)' : ''}</span>
         </h3>
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
