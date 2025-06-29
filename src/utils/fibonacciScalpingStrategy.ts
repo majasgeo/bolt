@@ -425,8 +425,11 @@ export class FibonacciScalpingBot {
     let maxHoldingCandles = this.config.maxHoldingMinutes;
     
     if (this.isSecondsTimeframe) {
-      // For seconds data, convert minutes to seconds
-      maxHoldingCandles = this.config.maxHoldingMinutes * 60;
+      // For seconds data, interpret maxHoldingMinutes as seconds
+      maxHoldingCandles = this.config.maxHoldingMinutes;
+    } else {
+      // For minute data, multiply by average candles per minute
+      maxHoldingCandles = this.config.maxHoldingMinutes;
     }
 
     // Close position if held for maximum time (scalping should be quick)

@@ -67,6 +67,7 @@ export class BollingerFibonacciHybridBot {
   private swingPoints: SwingPoint[] = [];
   private currentFibLevels: FibonacciLevel[] = [];
   private lastBreakoutTime: number = 0;
+  private isSecondsTimeframe: boolean = false;
 
   constructor(config: BollingerFibonacciConfig) {
     this.config = config;
@@ -89,6 +90,10 @@ export class BollingerFibonacciHybridBot {
     this.swingPoints = [];
     this.currentFibLevels = [];
     this.lastBreakoutTime = 0;
+    
+    // Detect if we're working with seconds data
+    this.isSecondsTimeframe = this.detectSecondsTimeframe(candles);
+    console.log(`BollingerFibonacciHybridBot detected ${this.isSecondsTimeframe ? 'seconds' : 'minute/hour'} timeframe data`);
 
     // Initialize swing points to prevent null errors
     this.initializeSwingPoints(candles);
@@ -149,6 +154,21 @@ export class BollingerFibonacciHybridBot {
     }
 
     return this.calculateResults();
+  }
+  
+  private detectSecondsTimeframe(candles: Candle[]): boolean {
+    if (candles.length < 2) return false;
+    
+    // Calculate average time difference between candles
+    let totalDiff = 0;
+    const sampleSize = Math.min(20, candles.length - 1);
+    
+    for (let i = 1; i <= sampleSize; i++) {
+      totalDiff += candles[i].timestamp - candles[i-1].timestamp;
+    }
+    
+    const avgDiff = totalDiff / sampleSize;
+    return avgDiff < 60000; // Less than 60 seconds = seconds timeframe
   }
 
   // Initialize swing points to prevent null errors
@@ -397,9 +417,20 @@ export class BollingerFibonacciHybridBot {
     const entryIndex = candles.findIndex(c => c && c.timestamp >= this.currentTrade!.entryTime);
     if (entryIndex === -1) return false;
 
-    // Close position if held for maximum time (1-minute scalping should be quick)
-    const minutesHeld = index - entryIndex;
-    return minutesHeld >= this.config.maxHoldingMinutes;
+    // For seconds data, adjust the holding time calculation
+    let maxHoldingCandles = this.config.maxHoldingMinutes;
+    
+    if (this.isSecondsTimeframe) {
+      // For seconds data, interpret maxHoldingMinutes as seconds
+      maxHoldingCandles = this.config.maxHoldingMinutes;
+    } else {
+      // For minute data, use minutes as is
+      maxHoldingCandles = this.config.maxHoldingMinutes;
+    }
+
+    // Close position if held for maximum time
+    const candlesHeld = index - entryIndex;
+    return candlesHeld >= maxHoldingCandles;
   }
 
   private shouldStopLoss(candle: Candle): boolean {
@@ -560,7 +591,13 @@ export class BollingerFibonacciHybridBot {
     const returns = this.trades.map(t => (t.pnl || 0) / this.config.initialCapital);
     const avgReturn = returns.reduce((sum, r) => sum + r, 0) / returns.length || 0;
     const returnVariance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length || 1;
-    const sharpeRatio = avgReturn / Math.sqrt(returnVariance) * Math.sqrt(252 * 24 * 60); // Annualized for 1-minute
+    
+    // Adjust annualization factor based on timeframe
+    const annualizationFactor = this.isSecondsTimeframe ? 
+      252 * 24 * 60 * 60 : // Seconds data
+      252 * 24 * 60;       // Minute data
+      
+    const sharpeRatio = avgReturn / Math.sqrt(returnVariance) * Math.sqrt(annualizationFactor);
 
     return {
       totalTrades: this.trades.length,
@@ -583,10 +620,13 @@ export class BollingerFibonacciHybridBot {
 
 // Helper function to create hybrid config
 export function createBollingerFibonacciConfig(basicConfig: TradingConfig): BollingerFibonacciConfig {
+  // Detect if we're likely working with seconds data based on period
+  const isLikelySecondsData = basicConfig.period < 10;
+  
   return {
     ...basicConfig,
-    // Fibonacci settings optimized for 1-minute scalping
-    swingLookback: 5,
+    // Fibonacci settings optimized for timeframe
+    swingLookback: isLikelySecondsData ? 3 : 5,
     fibRetracementLevels: [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1],
     goldenZoneMin: 0.5, // 50% level
     goldenZoneMax: 0.618, // 61.8% level
@@ -596,10 +636,10 @@ export function createBollingerFibonacciConfig(basicConfig: TradingConfig): Boll
     requireFibonacciRetracement: true,
     confirmationCandles: 1,
     
-    // Risk management for 1-minute scalping
-    profitTarget: 0.012, // 1.2% profit target
-    stopLossPercent: 0.008, // 0.8% stop loss
-    maxHoldingMinutes: 8, // Maximum 8 minutes
+    // Risk management adjusted for timeframe
+    profitTarget: isLikelySecondsData ? 0.006 : 0.012, // 0.6% or 1.2% profit target
+    stopLossPercent: isLikelySecondsData ? 0.004 : 0.008, // 0.4% or 0.8% stop loss
+    maxHoldingMinutes: isLikelySecondsData ? 30 : 8, // 30 seconds or 8 minutes
     
     // Volume and momentum filters
     requireVolumeConfirmation: true,
