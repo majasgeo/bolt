@@ -164,6 +164,17 @@ export class FibonacciScalpingBot {
   }
 
   private updateSwingPoints(candles: Candle[], currentIndex: number) {
+    // Clean up any null or undefined entries from swingPoints array first
+    this.swingPoints = this.swingPoints.filter(point => 
+      point !== null && 
+      point !== undefined && 
+      typeof point === 'object' && 
+      'type' in point && 
+      'price' in point && 
+      'index' in point && 
+      'timestamp' in point
+    );
+
     if (currentIndex < this.config.swingLookback * 2) return;
 
     const lookback = this.config.swingLookback;
@@ -217,13 +228,27 @@ export class FibonacciScalpingBot {
       });
     }
 
-    // Keep only recent swing points
+    // Keep only recent swing points and filter out any null entries again
     this.swingPoints = this.swingPoints.filter(point => 
-      point && currentIndex - point.index <= this.config.swingLookback * 10
+      point && 
+      point !== null && 
+      point !== undefined && 
+      currentIndex - point.index <= this.config.swingLookback * 10
     );
   }
 
   private checkStructureBreak(candles: Candle[], currentIndex: number) {
+    // Clean swing points array before processing
+    this.swingPoints = this.swingPoints.filter(point => 
+      point !== null && 
+      point !== undefined && 
+      typeof point === 'object' && 
+      'type' in point && 
+      'price' in point && 
+      'index' in point && 
+      'timestamp' in point
+    );
+
     if (this.swingPoints.length < 2) return;
 
     const currentCandle = candles[currentIndex];
