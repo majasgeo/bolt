@@ -64,6 +64,8 @@ export class FibonacciScalpingBot {
   }
 
   backtest(candles: Candle[], bands: BollingerBands[]): BacktestResult {
+    console.log("Starting Fibonacci backtest with config:", this.config);
+    
     this.trades = [];
     this.capital = this.config.initialCapital;
     this.currentTrade = null;
@@ -122,7 +124,14 @@ export class FibonacciScalpingBot {
       this.exitPosition(lastCandle, candles.length - 1, 'strategy-exit');
     }
 
-    return this.calculateResults();
+    const results = this.calculateResults();
+    console.log("Fibonacci backtest completed with results:", {
+      totalTrades: results.totalTrades,
+      winRate: results.winRate,
+      totalPnL: results.totalPnL
+    });
+    
+    return results;
   }
   
   private detectSecondsTimeframe(candles: Candle[]): boolean {
@@ -161,6 +170,8 @@ export class FibonacciScalpingBot {
       type: 'low',
       timestamp: candles[lowIndex].timestamp
     });
+    
+    console.log("Initialized swing points:", this.swingPoints);
   }
 
   private updateSwingPoints(candles: Candle[], currentIndex: number) {
