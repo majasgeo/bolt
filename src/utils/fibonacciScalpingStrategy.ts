@@ -229,7 +229,7 @@ export class FibonacciScalpingBot {
     const currentCandle = candles[currentIndex];
     if (!currentCandle) return;
     
-    // Enhanced type guard for swing points filtering
+    // Enhanced type guard for swing points filtering with explicit null checks
     const isValidSwingPoint = (p: SwingPoint | null | undefined): p is SwingPoint => {
       return p !== null && p !== undefined && 
              typeof p === 'object' && 
@@ -240,14 +240,15 @@ export class FibonacciScalpingBot {
              (p.type === 'high' || p.type === 'low');
     };
 
+    // Fix: Add explicit null check before accessing 'type' property
     const recentSwingHighs = this.swingPoints
       .filter(isValidSwingPoint)
-      .filter(p => p.type === 'high')
+      .filter(p => p && p.type === 'high')
       .slice(-3);
       
     const recentSwingLows = this.swingPoints
       .filter(isValidSwingPoint)
-      .filter(p => p.type === 'low')
+      .filter(p => p && p.type === 'low')
       .slice(-3);
 
     // Check for uptrend structure break (break of last swing high)
