@@ -229,8 +229,26 @@ export class FibonacciScalpingBot {
     const currentCandle = candles[currentIndex];
     if (!currentCandle) return;
     
-    const recentSwingHighs = this.swingPoints.filter(p => p && p.type === 'high').slice(-3);
-    const recentSwingLows = this.swingPoints.filter(p => p && p.type === 'low').slice(-3);
+    // Enhanced type guard for swing points filtering
+    const isValidSwingPoint = (p: SwingPoint | null | undefined): p is SwingPoint => {
+      return p !== null && p !== undefined && 
+             typeof p === 'object' && 
+             'type' in p && 
+             'price' in p && 
+             'index' in p && 
+             'timestamp' in p &&
+             (p.type === 'high' || p.type === 'low');
+    };
+
+    const recentSwingHighs = this.swingPoints
+      .filter(isValidSwingPoint)
+      .filter(p => p.type === 'high')
+      .slice(-3);
+      
+    const recentSwingLows = this.swingPoints
+      .filter(isValidSwingPoint)
+      .filter(p => p.type === 'low')
+      .slice(-3);
 
     // Check for uptrend structure break (break of last swing high)
     if (recentSwingHighs.length >= 1 && recentSwingLows.length >= 1) {
