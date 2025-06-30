@@ -84,6 +84,9 @@ export class FibonacciScalpingBot {
 
     for (let i = this.config.swingLookback; i < candles.length; i++) {
       const candle = candles[i];
+      const prevCandle = i > 0 ? candles[i-1] : null;
+      
+      if (!candle || !prevCandle) continue;
       
       // Update swing points with proper null checks
       this.updateSwingPoints(candles, i);
@@ -99,9 +102,9 @@ export class FibonacciScalpingBot {
 
       // Entry logic with null checks
       if (!this.currentTrade && this.currentFibRetracement) {
-        if (this.config.enableLongPositions && this.isLongEntry(candle, candles[i-1], volumeMA[i], i)) {
+        if (this.config.enableLongPositions && this.isLongEntry(candle, prevCandle, volumeMA[i], i)) {
           this.enterLongPosition(candle, i);
-        } else if (this.config.enableShortPositions && this.isShortEntry(candle, candles[i-1], volumeMA[i], i)) {
+        } else if (this.config.enableShortPositions && this.isShortEntry(candle, prevCandle, volumeMA[i], i)) {
           this.enterShortPosition(candle, i);
         }
       }
