@@ -102,9 +102,10 @@ export class FibonacciScalpingBot {
 
       // Entry logic with null checks
       if (!this.currentTrade && this.currentFibRetracement) {
-        if (this.config.enableLongPositions && this.isLongEntry(candle, prevCandle, volumeMA[i], i)) {
+        // Make sure we have valid swing points before checking entry conditions
+        if (this.isLongEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
           this.enterLongPosition(candle, i);
-        } else if (this.config.enableShortPositions && this.isShortEntry(candle, prevCandle, volumeMA[i], i)) {
+        } else if (this.isShortEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
           this.enterShortPosition(candle, i);
         }
       }
@@ -282,12 +283,12 @@ export class FibonacciScalpingBot {
     // Fix: Add explicit null check before accessing 'type' property
     const recentSwingHighs = this.swingPoints
       .filter(isValidSwingPoint)
-      .filter(p => p && p.type === 'high')
+      .filter(p => p.type === 'high')
       .slice(-3);
       
     const recentSwingLows = this.swingPoints
       .filter(isValidSwingPoint)
-      .filter(p => p && p.type === 'low')
+      .filter(p => p.type === 'low')
       .slice(-3);
 
     // Check for uptrend structure break (break of last swing high)
@@ -295,6 +296,7 @@ export class FibonacciScalpingBot {
       const lastSwingHigh = recentSwingHighs[recentSwingHighs.length - 1];
       const lastSwingLow = recentSwingLows[recentSwingLows.length - 1];
       
+      // Additional null checks before using the swing points
       if (!lastSwingHigh || !lastSwingLow) return;
 
       // Structure break to upside
