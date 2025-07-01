@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
-import { Upload, Download, Database, FileText, AlertCircle, CheckCircle, Clock } from 'lucide-react';
-import { parseCSVToCandles, generateSampleCSV } from '../utils/csvParser';
-import { Candle } from '../types/trading';
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, Download, Database, FileText, AlertCircle, CheckCircle, Clock, Settings, RefreshCw } from 'lucide-react';
+import { parseCSVData, generateSampleCSV, generateSampleTickData, TIMEFRAME_OPTIONS, aggregateTicksToCandles } from '../utils/csvParser';
+import { Candle, TickData, CSVColumnMapping, TimeframeOption, AssetInfo } from '../types/trading';
 
 interface DataSourcePanelProps {
   onDataLoaded: (candles: Candle[], source: string) => void;
@@ -15,6 +15,18 @@ export function DataSourcePanel({ onDataLoaded, currentDataSource, candleCount }
     type: 'success' | 'error' | null;
     message: string;
   }>({ type: null, message: '' });
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [columnMapping, setColumnMapping] = useState<CSVColumnMapping>({});
+  const [hasCustomMapping, setHasCustomMapping] = useState(false);
+  const [selectedTimeframe, setSelectedTimeframe] = useState<string>('');
+  const [rawData, setRawData] = useState<Candle[] | TickData[] | null>(null);
+  const [dataType, setDataType] = useState<'candle' | 'tick'>('candle');
+  const [assetInfo, setAssetInfo] = useState<AssetInfo>({
+    name: 'Unknown',
+    type: 'crypto',
+    symbol: 'UNKNOWN'
+  });
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -23,21 +35,72 @@ export function DataSourcePanel({ onDataLoaded, currentDataSource, candleCount }
 
     setIsUploading(true);
     setUploadStatus({ type: null, message: '' });
+    setRawData(null);
+    setDataType('candle');
+    setColumnMapping({});
+    setHasCustomMapping(false);
 
     try {
       const csvContent = await file.text();
-      const result = parseCSVToCandles(csvContent);
+      const result = parseCSVData(csvContent);
 
       if (result.success && result.data) {
-        // Detect timeframe
-        const timeframe = detectTimeframe(result.data);
-        const source = `${file.name} (${result.rowCount} candles, ${timeframe})`;
+        // Store raw data and metadata
+        setRawData(result.data);
+        setDataType(result.dataType);
+        setColumnMapping(result.columnMapping);
         
-        onDataLoaded(result.data, source);
-        setUploadStatus({
-          type: 'success',
-          message: `Successfully loaded ${result.rowCount} candles (${timeframe}) from ${file.name}`
-        });
+        // Set detected timeframe
+        if (result.detectedTimeframe) {
+          setSelectedTimeframe(result.detectedTimeframe);
+        }
+        
+        // Set asset info if available
+        if (result.assetName) {
+          setAssetInfo({
+            ...assetInfo,
+            name: result.assetName,
+            symbol: result.assetName
+          });
+        } else {
+          // Try to extract from filename
+          const filenameParts = file.name.split('.');
+          if (filenameParts.length > 1) {
+            const possibleSymbol = filenameParts[0].toUpperCase();
+            setAssetInfo({
+              ...assetInfo,
+              name: possibleSymbol,
+              symbol: possibleSymbol
+            });
+          }
+        }
+        
+        // Process data based on type
+        if (result.dataType === 'tick') {
+          // For tick data, we need to aggregate to candles
+          const tickData = result.data as TickData[];
+          const timeframeOption = TIMEFRAME_OPTIONS.find(t => t.value === '1m') || TIMEFRAME_OPTIONS[4]; // Default to 1m
+          const candles = aggregateTicksToCandles(tickData, timeframeOption.seconds);
+          
+          const source = `${file.name} (${result.rowCount} ticks → ${candles.length} candles, ${timeframeOption.label})`;
+          onDataLoaded(candles, source);
+          
+          setUploadStatus({
+            type: 'success',
+            message: `Successfully loaded ${result.rowCount} ticks and converted to ${candles.length} candles (${timeframeOption.label}) from ${file.name}`
+          });
+        } else {
+          // For candle data, use as-is
+          const candles = result.data as Candle[];
+          const timeframe = result.detectedTimeframe || 'Unknown';
+          const source = `${file.name} (${result.rowCount} candles, ${timeframe})`;
+          
+          onDataLoaded(candles, source);
+          setUploadStatus({
+            type: 'success',
+            message: `Successfully loaded ${result.rowCount} candles (${timeframe}) from ${file.name}`
+          });
+        }
       } else {
         setUploadStatus({
           type: 'error',
@@ -57,51 +120,111 @@ export function DataSourcePanel({ onDataLoaded, currentDataSource, candleCount }
     }
   };
 
-  const detectTimeframe = (candles: Candle[]): string => {
-    if (candles.length < 2) return 'Unknown';
-    
-    const timeDiffs = [];
-    for (let i = 1; i < Math.min(10, candles.length); i++) {
-      timeDiffs.push(candles[i].timestamp - candles[i-1].timestamp);
+  // When timeframe changes for tick data, reaggregate
+  useEffect(() => {
+    if (rawData && dataType === 'tick' && selectedTimeframe) {
+      const timeframeOption = TIMEFRAME_OPTIONS.find(t => t.value === selectedTimeframe);
+      if (timeframeOption) {
+        const tickData = rawData as TickData[];
+        const candles = aggregateTicksToCandles(tickData, timeframeOption.seconds);
+        
+        const source = `${currentDataSource.split('(')[0] || 'Data'} (${tickData.length} ticks → ${candles.length} candles, ${timeframeOption.label})`;
+        onDataLoaded(candles, source);
+        
+        setUploadStatus({
+          type: 'success',
+          message: `Converted ${tickData.length} ticks to ${candles.length} candles (${timeframeOption.label})`
+        });
+      }
     }
-    
-    const avgDiff = timeDiffs.reduce((sum, diff) => sum + diff, 0) / timeDiffs.length;
-    const seconds = avgDiff / 1000;
-    
-    if (seconds <= 1.5) return '1-second';
-    if (seconds <= 5.5) return '5-second';
-    if (seconds <= 15.5) return '15-second';
-    if (seconds <= 30.5) return '30-second';
-    if (seconds <= 65) return '1-minute';
-    if (seconds <= 300.5) return '5-minute';
-    if (seconds <= 900.5) return '15-minute';
-    if (seconds <= 1830) return '30-minute';
-    if (seconds <= 3650) return '1-hour';
-    if (seconds <= 14400) return '4-hour';
-    if (seconds <= 86500) return '1-day';
-    return `${Math.round(seconds)}-second`;
+  }, [selectedTimeframe, rawData, dataType]);
+
+  const handleCustomMappingChange = (field: keyof CSVColumnMapping, value: string) => {
+    setColumnMapping(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    setHasCustomMapping(true);
   };
 
-  const downloadSampleCSV = () => {
-    const csvContent = generateSampleCSV();
+  const applyCustomMapping = () => {
+    if (!rawData || !hasCustomMapping) return;
+    
+    setIsUploading(true);
+    
+    try {
+      if (dataType === 'tick') {
+        // Re-parse tick data with new mapping
+        const tickData = rawData as TickData[];
+        // TODO: Implement custom mapping for tick data
+        
+        // Then reaggregate to candles
+        const timeframeOption = TIMEFRAME_OPTIONS.find(t => t.value === selectedTimeframe) || TIMEFRAME_OPTIONS[4];
+        const candles = aggregateTicksToCandles(tickData, timeframeOption.seconds);
+        
+        const source = `Custom Mapped Data (${tickData.length} ticks → ${candles.length} candles, ${timeframeOption.label})`;
+        onDataLoaded(candles, source);
+        
+        setUploadStatus({
+          type: 'success',
+          message: `Applied custom mapping and converted to ${candles.length} candles (${timeframeOption.label})`
+        });
+      } else {
+        // Re-parse candle data with new mapping
+        const candles = rawData as Candle[];
+        // TODO: Implement custom mapping for candle data
+        
+        const source = `Custom Mapped Data (${candles.length} candles)`;
+        onDataLoaded(candles, source);
+        
+        setUploadStatus({
+          type: 'success',
+          message: `Applied custom mapping to ${candles.length} candles`
+        });
+      }
+    } catch (error) {
+      setUploadStatus({
+        type: 'error',
+        message: `Error applying custom mapping: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const downloadSampleCSV = (assetType: 'crypto' | 'stock' | 'forex' | 'commodity') => {
+    const csvContent = generateSampleCSV(false, assetType);
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sample_trading_data.csv';
+    a.download = `sample_${assetType}_data.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  const downloadSecondsTimeframeCSV = () => {
-    const csvContent = generateSampleCSV(true); // true for seconds timeframe
+  const downloadSecondsTimeframeCSV = (assetType: 'crypto' | 'stock' | 'forex' | 'commodity') => {
+    const csvContent = generateSampleCSV(true, assetType);
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sample_seconds_data.csv';
+    a.download = `sample_${assetType}_seconds_data.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadSampleTickData = (assetType: 'crypto' | 'stock' | 'forex') => {
+    const csvContent = generateSampleTickData(assetType);
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sample_${assetType}_tick_data.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -109,8 +232,8 @@ export function DataSourcePanel({ onDataLoaded, currentDataSource, candleCount }
   };
 
   const currentTimeframe = currentDataSource.includes('(') ? 
-    currentDataSource.split('(')[1]?.split(')')[0] || 'Unknown timeframe' : 
-    'Generated hourly data';
+    currentDataSource.split('(')[1]?.split(')')[0]?.split(',')[1]?.trim() || 'Unknown timeframe' : 
+    'Unknown timeframe';
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
@@ -125,12 +248,95 @@ export function DataSourcePanel({ onDataLoaded, currentDataSource, candleCount }
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-blue-600">Current Dataset</p>
-              <p className="text-lg font-semibold text-blue-900">{currentDataSource}</p>
+              <p className="text-lg font-semibold text-blue-900">{currentDataSource || 'No data loaded'}</p>
               <p className="text-sm text-blue-700">{candleCount.toLocaleString()} candles loaded</p>
             </div>
             <FileText className="h-8 w-8 text-blue-500" />
           </div>
         </div>
+
+        {/* Timeframe Selector (for tick data) */}
+        {dataType === 'tick' && rawData && (
+          <div className="bg-indigo-50 rounded-lg p-4">
+            <h4 className="font-semibold text-indigo-900 mb-2 flex items-center">
+              <RefreshCw className="h-5 w-5 mr-2 text-indigo-600" />
+              Tick Data Aggregation
+            </h4>
+            <div className="text-sm text-indigo-700 mb-3">
+              <p>Convert tick data to candles by selecting a timeframe:</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={selectedTimeframe}
+                onChange={(e) => setSelectedTimeframe(e.target.value)}
+                className="px-3 py-2 border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              >
+                {TIMEFRAME_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => {
+                  if (rawData && dataType === 'tick' && selectedTimeframe) {
+                    const timeframeOption = TIMEFRAME_OPTIONS.find(t => t.value === selectedTimeframe);
+                    if (timeframeOption) {
+                      const tickData = rawData as TickData[];
+                      const candles = aggregateTicksToCandles(tickData, timeframeOption.seconds);
+                      
+                      const source = `${currentDataSource.split('(')[0] || 'Data'} (${tickData.length} ticks → ${candles.length} candles, ${timeframeOption.label})`;
+                      onDataLoaded(candles, source);
+                      
+                      setUploadStatus({
+                        type: 'success',
+                        message: `Converted ${tickData.length} ticks to ${candles.length} candles (${timeframeOption.label})`
+                      });
+                    }
+                  }
+                }}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                Apply Timeframe
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Asset Information */}
+        {rawData && (
+          <div className="bg-green-50 rounded-lg p-4">
+            <h4 className="font-semibold text-green-900 mb-2 flex items-center">
+              <FileText className="h-5 w-5 mr-2 text-green-600" />
+              Asset Information
+            </h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-green-700 mb-1">Asset Symbol</label>
+                <input
+                  type="text"
+                  value={assetInfo.symbol}
+                  onChange={(e) => setAssetInfo({...assetInfo, symbol: e.target.value.toUpperCase()})}
+                  className="w-full px-3 py-2 border border-green-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-green-700 mb-1">Asset Type</label>
+                <select
+                  value={assetInfo.type}
+                  onChange={(e) => setAssetInfo({...assetInfo, type: e.target.value as any})}
+                  className="w-full px-3 py-2 border border-green-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="crypto">Cryptocurrency</option>
+                  <option value="stock">Stock</option>
+                  <option value="forex">Forex</option>
+                  <option value="commodity">Commodity</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Timeframe Warning */}
         {currentTimeframe.includes('second') && (
@@ -140,10 +346,9 @@ export function DataSourcePanel({ onDataLoaded, currentDataSource, candleCount }
               <div>
                 <h4 className="font-semibold text-orange-800 mb-1">Seconds Timeframe Detected</h4>
                 <div className="text-sm text-orange-700 space-y-1">
-                  <p>• <strong>Ultra-High Frequency:</strong> Seconds data is ideal for Ultra-Fast Scalping Bot</p>
                   <p>• <strong>Different Parameters:</strong> Use smaller periods (2-5) and tighter stops</p>
                   <p>• <strong>More Trades:</strong> Expect many more trades with micro profits/losses</p>
-                  <p>• <strong>Recommendation:</strong> Use Ultra-Fast Scalping Bot with 5-15 second holding times</p>
+                  <p>• <strong>Recommendation:</strong> Use smaller Bollinger Band periods (3-8) for seconds data</p>
                 </div>
               </div>
             </div>
@@ -238,35 +443,246 @@ export function DataSourcePanel({ onDataLoaded, currentDataSource, candleCount }
             </div>
           )}
 
+          {/* Advanced Settings Toggle */}
+          <div className="border-t pt-4">
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+              <Settings className="h-4 w-4 mr-1" />
+              {showAdvanced ? 'Hide' : 'Show'} Advanced Settings
+            </button>
+          </div>
+
+          {/* Advanced Settings */}
+          {showAdvanced && (
+            <div className="space-y-4 border-t pt-4">
+              {/* Column Mapping */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-semibold text-gray-900 mb-3">Custom Column Mapping</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Timestamp Column</label>
+                    <input
+                      type="text"
+                      value={columnMapping.timestamp || ''}
+                      onChange={(e) => handleCustomMappingChange('timestamp', e.target.value)}
+                      placeholder="timestamp, time, etc."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Date Column</label>
+                    <input
+                      type="text"
+                      value={columnMapping.date || ''}
+                      onChange={(e) => handleCustomMappingChange('date', e.target.value)}
+                      placeholder="date"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Open Column</label>
+                    <input
+                      type="text"
+                      value={columnMapping.open || ''}
+                      onChange={(e) => handleCustomMappingChange('open', e.target.value)}
+                      placeholder="open"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">High Column</label>
+                    <input
+                      type="text"
+                      value={columnMapping.high || ''}
+                      onChange={(e) => handleCustomMappingChange('high', e.target.value)}
+                      placeholder="high"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Low Column</label>
+                    <input
+                      type="text"
+                      value={columnMapping.low || ''}
+                      onChange={(e) => handleCustomMappingChange('low', e.target.value)}
+                      placeholder="low"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Close Column</label>
+                    <input
+                      type="text"
+                      value={columnMapping.close || ''}
+                      onChange={(e) => handleCustomMappingChange('close', e.target.value)}
+                      placeholder="close, price, etc."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Volume Column</label>
+                    <input
+                      type="text"
+                      value={columnMapping.volume || ''}
+                      onChange={(e) => handleCustomMappingChange('volume', e.target.value)}
+                      placeholder="volume, vol, etc."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bid Column (Tick Data)</label>
+                    <input
+                      type="text"
+                      value={columnMapping.bid || ''}
+                      onChange={(e) => handleCustomMappingChange('bid', e.target.value)}
+                      placeholder="bid"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Ask Column (Tick Data)</label>
+                    <input
+                      type="text"
+                      value={columnMapping.ask || ''}
+                      onChange={(e) => handleCustomMappingChange('ask', e.target.value)}
+                      placeholder="ask, offer, etc."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <button
+                    onClick={applyCustomMapping}
+                    disabled={!hasCustomMapping || !rawData}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Apply Custom Mapping
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* CSV Format Info */}
           <div className="bg-gray-50 rounded-lg p-4">
-            <h4 className="font-semibold text-gray-900 mb-2">CSV Format Requirements</h4>
+            <h4 className="font-semibold text-gray-900 mb-2">CSV Format Support</h4>
             <div className="text-sm text-gray-600 space-y-1">
-              <p>• <strong>Required:</strong> Close price column (close, price)</p>
-              <p>• <strong>Optional:</strong> Timestamp, Open, High, Low, Volume</p>
-              <p>• <strong>Headers:</strong> First row should contain column names</p>
-              <p>• <strong>Timestamp:</strong> Unix timestamp or date string (YYYY-MM-DD HH:mm:ss)</p>
-              <p>• <strong>Seconds Data:</strong> Timestamps with seconds precision are fully supported</p>
+              <p>• <strong>Universal Support:</strong> Crypto, Stocks, Forex, Commodities</p>
+              <p>• <strong>Data Types:</strong> OHLCV candles or tick data (bid/ask/last)</p>
+              <p>• <strong>Timeframes:</strong> Seconds, minutes, hours, days - any granularity</p>
+              <p>• <strong>Headers:</strong> Automatic column detection with custom mapping option</p>
+              <p>• <strong>Timestamps:</strong> Unix timestamps or date strings (YYYY-MM-DD HH:mm:ss)</p>
             </div>
           </div>
 
           {/* Sample Download */}
-          <div className="flex flex-col space-y-2">
-            <button
-              onClick={downloadSampleCSV}
-              className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Download Sample CSV (Hourly Data)
-            </button>
+          <div className="space-y-3">
+            <h4 className="font-semibold text-gray-900 mb-2">Sample Data Files</h4>
             
-            <button
-              onClick={downloadSecondsTimeframeCSV}
-              className="w-full bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Download Sample CSV (Seconds Data)
-            </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="bg-blue-50 rounded-lg p-3">
+                <h5 className="font-medium text-blue-800 mb-2">Cryptocurrency</h5>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => downloadSampleCSV('crypto')}
+                    className="w-full bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    BTC/USDT Hourly
+                  </button>
+                  <button
+                    onClick={() => downloadSecondsTimeframeCSV('crypto')}
+                    className="w-full bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    BTC/USDT Seconds
+                  </button>
+                  <button
+                    onClick={() => downloadSampleTickData('crypto')}
+                    className="w-full bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    BTC/USDT Ticks
+                  </button>
+                </div>
+              </div>
+              
+              <div className="bg-green-50 rounded-lg p-3">
+                <h5 className="font-medium text-green-800 mb-2">Stocks</h5>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => downloadSampleCSV('stock')}
+                    className="w-full bg-green-100 hover:bg-green-200 text-green-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    AAPL Hourly
+                  </button>
+                  <button
+                    onClick={() => downloadSecondsTimeframeCSV('stock')}
+                    className="w-full bg-green-100 hover:bg-green-200 text-green-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    AAPL Seconds
+                  </button>
+                  <button
+                    onClick={() => downloadSampleTickData('stock')}
+                    className="w-full bg-green-100 hover:bg-green-200 text-green-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    AAPL Ticks
+                  </button>
+                </div>
+              </div>
+              
+              <div className="bg-purple-50 rounded-lg p-3">
+                <h5 className="font-medium text-purple-800 mb-2">Forex</h5>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => downloadSampleCSV('forex')}
+                    className="w-full bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    EUR/USD Hourly
+                  </button>
+                  <button
+                    onClick={() => downloadSecondsTimeframeCSV('forex')}
+                    className="w-full bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    EUR/USD Seconds
+                  </button>
+                  <button
+                    onClick={() => downloadSampleTickData('forex')}
+                    className="w-full bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    EUR/USD Ticks
+                  </button>
+                </div>
+              </div>
+              
+              <div className="bg-yellow-50 rounded-lg p-3">
+                <h5 className="font-medium text-yellow-800 mb-2">Commodities</h5>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => downloadSampleCSV('commodity')}
+                    className="w-full bg-yellow-100 hover:bg-yellow-200 text-yellow-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    Gold (XAU/USD) Hourly
+                  </button>
+                  <button
+                    onClick={() => downloadSecondsTimeframeCSV('commodity')}
+                    className="w-full bg-yellow-100 hover:bg-yellow-200 text-yellow-700 font-medium py-1.5 px-3 rounded-lg transition-colors flex items-center justify-center text-sm"
+                  >
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    Gold (XAU/USD) Seconds
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

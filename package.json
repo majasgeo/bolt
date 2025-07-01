@@ -1,10 +1,10 @@
 {
-  "name": "bolt-trading-bots",
+  "name": "universal-bollinger-bands-bot",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Advanced Trading Bot Suite with 6 strategies: Bollinger Bands, Day Trading, Fibonacci Scalping, Ultra-Fast Scalping, Enhanced Bollinger, and Bollinger+Fibonacci Hybrid",
-  "keywords": ["trading", "bot", "bollinger-bands", "fibonacci", "scalping", "backtesting", "optimization"],
+  "description": "Universal Bollinger Bands Trading Bot with support for any asset class and timeframe",
+  "keywords": ["trading", "bot", "bollinger-bands", "backtesting", "optimization", "crypto", "stocks", "forex", "commodities"],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -12,11 +12,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "date-fns": "^2.30.0",
     "lucide-react": "^0.344.0",
     "papaparse": "^5.4.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "date-fns": "^2.30.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",

@@ -7,6 +7,14 @@ export interface Candle {
   volume: number;
 }
 
+export interface TickData {
+  timestamp: number;
+  price: number;
+  bid?: number;
+  ask?: number;
+  volume?: number;
+}
+
 export interface BollingerBands {
   upper: number;
   middle: number;
@@ -25,6 +33,8 @@ export interface Trade {
   pnl?: number;
   isOpen: boolean;
   reason?: 'stop-loss' | 'target' | 'strategy-exit';
+  asset?: string;
+  timeframe?: string;
 }
 
 export interface BacktestResult {
@@ -42,6 +52,8 @@ export interface BacktestResult {
   lastTradeTime?: number;
   tradingPeriodDays?: number;
   averageTradesPerDay?: number;
+  asset?: string;
+  timeframe?: string;
 }
 
 export interface TradingConfig {
@@ -52,6 +64,12 @@ export interface TradingConfig {
   initialCapital: number;
   enableLongPositions: boolean;
   enableShortPositions: boolean;
+  takeProfitPercent?: number;
+  stopLossPercent?: number;
+  trailingStopPercent?: number;
+  maxHoldingPeriods?: number;
+  asset?: string;
+  timeframe?: string;
 }
 
 export interface OptimizationResult {
@@ -68,6 +86,11 @@ export interface OptimizationResult {
   score: number;
   tradingPeriodDays?: number;
   averageTradesPerDay?: number;
+  asset?: string;
+  timeframe?: string;
+  takeProfitPercent?: number;
+  stopLossPercent?: number;
+  trailingStopPercent?: number;
 }
 
 export interface OptimizationProgress {
@@ -86,4 +109,36 @@ export interface OptimizationFilters {
   minimumWinRate?: number;
   maximumDrawdown?: number;
   minimumReturn?: number;
+}
+
+export interface CSVColumnMapping {
+  timestamp?: string;
+  date?: string;
+  time?: string;
+  open?: string;
+  high?: string;
+  low?: string;
+  close?: string;
+  price?: string;
+  volume?: string;
+  bid?: string;
+  ask?: string;
+  last?: string;
+  symbol?: string;
+  exchange?: string;
+}
+
+export interface TimeframeOption {
+  value: string;
+  label: string;
+  seconds: number;
+}
+
+export interface AssetInfo {
+  name: string;
+  type: 'crypto' | 'stock' | 'forex' | 'commodity' | 'other';
+  symbol: string;
+  exchange?: string;
+  tickSize?: number;
+  pipValue?: number;
 }
