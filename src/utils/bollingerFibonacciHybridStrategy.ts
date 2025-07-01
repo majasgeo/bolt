@@ -84,7 +84,7 @@ export class BollingerFibonacciHybridBot {
     }
     
     if (this.debugMode) {
-      console.log("BollingerFibonacciHybridBot initialized with config:", this.config);
+      console.log("BollingerFibonacciHybridBot initialized with config:", JSON.stringify(this.config));
     }
   }
 
@@ -187,6 +187,36 @@ export class BollingerFibonacciHybridBot {
     return avgDiff < 60000; // Less than 60 seconds = seconds timeframe
   }
 
+  /**
+   * Validates if an object is a valid SwingPoint
+   * This is a critical function used throughout the code to prevent null errors
+   */
+  private isValidSwingPoint(point: any): point is SwingPoint {
+    if (!point) return false;
+    if (typeof point !== 'object') return false;
+    
+    // Check required properties exist
+    if (!('index' in point)) return false;
+    if (!('price' in point)) return false;
+    if (!('type' in point)) return false;
+    if (!('timestamp' in point)) return false;
+    
+    // Check property types
+    if (typeof point.index !== 'number') return false;
+    if (typeof point.price !== 'number') return false;
+    if (typeof point.type !== 'string') return false;
+    if (typeof point.timestamp !== 'number') return false;
+    
+    // Check type is valid
+    if (point.type !== 'high' && point.type !== 'low') return false;
+    
+    // Check values are valid
+    if (isNaN(point.index) || isNaN(point.price) || isNaN(point.timestamp)) return false;
+    if (point.price <= 0) return false;
+    
+    return true;
+  }
+
   // Initialize swing points to prevent null errors
   private initializeSwingPoints(candles: Candle[]) {
     if (candles.length < this.config.swingLookback * 2) {
@@ -200,21 +230,35 @@ export class BollingerFibonacciHybridBot {
     
     if (this.debugMode) console.log(`Initializing swing points at indices ${highIndex} (high) and ${lowIndex} (low)`);
     
-    this.swingPoints.push({
+    const highPoint: SwingPoint = {
       index: highIndex,
       price: candles[highIndex].high,
       type: 'high',
       timestamp: candles[highIndex].timestamp
-    });
+    };
     
-    this.swingPoints.push({
+    const lowPoint: SwingPoint = {
       index: lowIndex,
       price: candles[lowIndex].low,
       type: 'low',
       timestamp: candles[lowIndex].timestamp
-    });
+    };
     
-    if (this.debugMode) console.log("Initialized swing points:", this.swingPoints);
+    this.swingPoints.push(highPoint);
+    this.swingPoints.push(lowPoint);
+    
+    if (this.debugMode) {
+      console.log("Initialized swing points:", JSON.stringify(this.swingPoints));
+      console.log(`SwingPoints array length after initialization: ${this.swingPoints.length}`);
+      
+      // Verify each point has the required properties
+      this.swingPoints.forEach((point, idx) => {
+        console.log(`SwingPoint[${idx}]:`, 
+          point ? 
+          `index=${point.index}, price=${point.price}, type=${point.type}, timestamp=${point.timestamp}` : 
+          'NULL POINT');
+      });
+    }
   }
 
   private generateHybridSignal(
@@ -315,17 +359,18 @@ export class BollingerFibonacciHybridBot {
 
   private updateSwingPoints(candles: Candle[], currentIndex: number) {
     // CRITICAL: Clean up any null or undefined entries from swingPoints array first
-    this.swingPoints = this.swingPoints.filter(point => 
-      point !== null && 
-      point !== undefined && 
-      typeof point === 'object' && 
-      'type' in point && 
-      typeof point.type === 'string' &&
-      (point.type === 'high' || point.type === 'low') &&
-      'price' in point && 
-      'index' in point && 
-      'timestamp' in point
-    );
+    const validSwingPoints = this.swingPoints.filter(point => this.isValidSwingPoint(point));
+    
+    // If we lost any points during filtering, log it
+    if (validSwingPoints.length !== this.swingPoints.length) {
+      if (this.debugMode) {
+        console.log(`⚠️ Removed ${this.swingPoints.length - validSwingPoints.length} invalid swing points`);
+        console.log(`SwingPoints before: ${this.swingPoints.length}, after: ${validSwingPoints.length}`);
+      }
+    }
+    
+    // Update the array with only valid points
+    this.swingPoints = validSwingPoints;
 
     if (currentIndex < this.config.swingLookback * 2) {
       if (this.debugMode) console.log(`Skipping swing point detection at index ${currentIndex} - not enough history`);
@@ -393,23 +438,21 @@ export class BollingerFibonacciHybridBot {
       if (this.debugMode) console.log(`Added new swing low at index ${centerIndex}, price ${centerCandle.low}`);
     }
 
-    // Keep only recent swing points and filter out any null entries again
+    // Keep only recent swing points and filter out any invalid entries again
     this.swingPoints = this.swingPoints.filter(point => 
-      point && 
-      point !== null && 
-      point !== undefined && 
-      typeof point === 'object' &&
-      'type' in point &&
-      typeof point.type === 'string' &&
-      (point.type === 'high' || point.type === 'low') &&
-      'price' in point &&
-      'index' in point &&
-      'timestamp' in point &&
+      this.isValidSwingPoint(point) &&
       currentIndex - point.index <= this.config.swingLookback * 10
     );
     
     if (this.debugMode && (isSwingHigh || isSwingLow)) {
       console.log(`After update, swingPoints count: ${this.swingPoints.length}`);
+      
+      // Verify the array is clean
+      const invalidPoints = this.swingPoints.filter(point => !this.isValidSwingPoint(point));
+      if (invalidPoints.length > 0) {
+        console.error(`⚠️ CRITICAL: Still have ${invalidPoints.length} invalid points after filtering!`);
+        console.log("Invalid points:", invalidPoints);
+      }
     }
   }
 
@@ -480,19 +523,19 @@ export class BollingerFibonacciHybridBot {
   }
 
   private isInGoldenZone(price: number, direction: 'long' | 'short'): boolean {
-    if (this.currentFibLevels.length === 0) {
+    if (!this.currentFibLevels || !Array.isArray(this.currentFibLevels) || this.currentFibLevels.length === 0) {
       if (this.debugMode) console.log("No Fibonacci levels available for golden zone check");
       return false;
     }
 
     const goldenZoneLow = this.currentFibLevels.find(l => 
-      l && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
+      l && typeof l.level === 'number' && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
     );
     
     const goldenZoneHigh = this.currentFibLevels.find(l => 
-      l && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
+      l && typeof l.level === 'number' && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
     );
-
+    
     if (!goldenZoneLow || !goldenZoneHigh) {
       if (this.debugMode) console.log("Golden zone levels not found in Fibonacci levels");
       return false;
