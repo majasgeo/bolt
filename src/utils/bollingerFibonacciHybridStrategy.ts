@@ -39,6 +39,8 @@ export interface SwingPoint {
   price: number;
   type: 'high' | 'low';
   timestamp: number;
+  createdAt?: number; // For tracking when this point was created
+  source?: string; // For tracking where this point was created
 }
 
 export interface FibonacciLevel {
@@ -69,6 +71,7 @@ export class BollingerFibonacciHybridBot {
   private lastBreakoutTime: number = 0;
   private isSecondsTimeframe: boolean = false;
   private debugMode: boolean = true; // Enable debug logging
+  private swingPointMutations: {action: string, point: SwingPoint | null, timestamp: number, stack: string}[] = [];
 
   constructor(config: BollingerFibonacciConfig) {
     this.config = config;
@@ -97,6 +100,7 @@ export class BollingerFibonacciHybridBot {
     this.swingPoints = [];
     this.currentFibLevels = [];
     this.lastBreakoutTime = 0;
+    this.swingPointMutations = [];
     
     // Detect if we're working with seconds data
     this.isSecondsTimeframe = this.detectSecondsTimeframe(candles);
@@ -167,6 +171,11 @@ export class BollingerFibonacciHybridBot {
         winRate: results.winRate,
         totalPnL: results.totalPnL
       });
+      
+      // Log swing point mutation history if there were errors
+      if (this.swingPointMutations.length > 0) {
+        console.log(`Recorded ${this.swingPointMutations.length} swing point mutations`);
+      }
     }
     
     return results;
@@ -217,6 +226,27 @@ export class BollingerFibonacciHybridBot {
     return true;
   }
 
+  /**
+   * Track mutations to the swing points array for debugging
+   */
+  private trackSwingPointMutation(action: string, point: SwingPoint | null) {
+    // Get stack trace
+    const stack = new Error().stack || '';
+    
+    this.swingPointMutations.push({
+      action,
+      point,
+      timestamp: Date.now(),
+      stack
+    });
+    
+    // If we're tracking a null point, log it immediately as this is likely an error
+    if (action !== 'filter' && point === null) {
+      console.error(`⚠️ CRITICAL: Attempted to ${action} a null swing point!`);
+      console.error(`Stack trace: ${stack}`);
+    }
+  }
+
   // Initialize swing points to prevent null errors
   private initializeSwingPoints(candles: Candle[]) {
     if (candles.length < this.config.swingLookback * 2) {
@@ -234,16 +264,25 @@ export class BollingerFibonacciHybridBot {
       index: highIndex,
       price: candles[highIndex].high,
       type: 'high',
-      timestamp: candles[highIndex].timestamp
+      timestamp: candles[highIndex].timestamp,
+      createdAt: Date.now(),
+      source: 'initialization'
     };
     
     const lowPoint: SwingPoint = {
       index: lowIndex,
       price: candles[lowIndex].low,
       type: 'low',
-      timestamp: candles[lowIndex].timestamp
+      timestamp: candles[lowIndex].timestamp,
+      createdAt: Date.now(),
+      source: 'initialization'
     };
     
+    // Track mutations
+    this.trackSwingPointMutation('add', highPoint);
+    this.trackSwingPointMutation('add', lowPoint);
+    
+    // Add to array
     this.swingPoints.push(highPoint);
     this.swingPoints.push(lowPoint);
     
@@ -261,112 +300,20 @@ export class BollingerFibonacciHybridBot {
     }
   }
 
-  private generateHybridSignal(
-    candle: Candle,
-    prevCandle: Candle,
-    band: BollingerBands,
-    prevBand: BollingerBands,
-    volumeMA: number,
-    index: number,
-    candles: Candle[]
-  ): HybridSignal | null {
-    
-    // Step 1: Check for Bollinger Band breakout
-    const longBreakout = this.config.requireBollingerBreakout ? 
-      (prevCandle.close <= prevBand.upper && candle.close > band.upper) : true;
-    
-    const shortBreakout = this.config.requireBollingerBreakout ? 
-      (prevCandle.close >= prevBand.lower && candle.close < band.lower) : true;
-
-    // Step 2: Check for Fibonacci retracement to golden zone
-    const fibRetracementLong = this.config.requireFibonacciRetracement ? 
-      this.isInGoldenZone(candle.close, 'long') : true;
-    
-    const fibRetracementShort = this.config.requireFibonacciRetracement ? 
-      this.isInGoldenZone(candle.close, 'short') : true;
-
-    // Step 3: Volume confirmation
-    const volumeConfirmation = this.config.requireVolumeConfirmation ? 
-      (volumeMA > 0 && candle.volume > volumeMA * this.config.volumeThreshold) : true;
-
-    // Step 4: Momentum confirmation (price action)
-    const momentumConfirmationLong = this.config.requireMomentumConfirmation ? 
-      (candle.close > candle.open && candle.close > prevCandle.close) : true;
-    
-    const momentumConfirmationShort = this.config.requireMomentumConfirmation ? 
-      (candle.close < candle.open && candle.close < prevCandle.close) : true;
-
-    // Generate long signal
-    if (longBreakout && fibRetracementLong && volumeConfirmation && momentumConfirmationLong) {
-      const strength = this.calculateSignalStrength(
-        longBreakout, fibRetracementLong, volumeConfirmation, momentumConfirmationLong
-      );
-
-      if (this.debugMode) console.log(`Long signal generated at index ${index} with strength ${strength}`);
-
-      return {
-        type: 'long',
-        strength,
-        bollingerBreakout: longBreakout,
-        fibonacciRetracement: fibRetracementLong,
-        volumeConfirmation,
-        momentumConfirmation: momentumConfirmationLong,
-        entryPrice: candle.close,
-        stopLoss: candle.close * (1 - this.config.stopLossPercent),
-        takeProfit: candle.close * (1 + this.config.profitTarget)
-      };
-    }
-
-    // Generate short signal
-    if (shortBreakout && fibRetracementShort && volumeConfirmation && momentumConfirmationShort) {
-      const strength = this.calculateSignalStrength(
-        shortBreakout, fibRetracementShort, volumeConfirmation, momentumConfirmationShort
-      );
-
-      if (this.debugMode) console.log(`Short signal generated at index ${index} with strength ${strength}`);
-
-      return {
-        type: 'short',
-        strength,
-        bollingerBreakout: shortBreakout,
-        fibonacciRetracement: fibRetracementShort,
-        volumeConfirmation,
-        momentumConfirmation: momentumConfirmationShort,
-        entryPrice: candle.close,
-        stopLoss: candle.close * (1 + this.config.stopLossPercent),
-        takeProfit: candle.close * (1 - this.config.profitTarget)
-      };
-    }
-
-    return null;
-  }
-
-  private calculateSignalStrength(
-    bollingerBreakout: boolean,
-    fibonacciRetracement: boolean,
-    volumeConfirmation: boolean,
-    momentumConfirmation: boolean
-  ): number {
-    let strength = 0;
-    
-    if (bollingerBreakout) strength += 30; // BB breakout is strong signal
-    if (fibonacciRetracement) strength += 25; // Fibonacci retracement adds precision
-    if (volumeConfirmation) strength += 25; // Volume confirms the move
-    if (momentumConfirmation) strength += 20; // Momentum confirms direction
-    
-    return strength;
-  }
-
   private updateSwingPoints(candles: Candle[], currentIndex: number) {
     // CRITICAL: Clean up any null or undefined entries from swingPoints array first
+    const originalLength = this.swingPoints.length;
     const validSwingPoints = this.swingPoints.filter(point => this.isValidSwingPoint(point));
     
     // If we lost any points during filtering, log it
-    if (validSwingPoints.length !== this.swingPoints.length) {
+    if (validSwingPoints.length !== originalLength) {
       if (this.debugMode) {
-        console.log(`⚠️ Removed ${this.swingPoints.length - validSwingPoints.length} invalid swing points`);
-        console.log(`SwingPoints before: ${this.swingPoints.length}, after: ${validSwingPoints.length}`);
+        console.log(`⚠️ Removed ${originalLength - validSwingPoints.length} invalid swing points`);
+        console.log(`SwingPoints before: ${originalLength}, after: ${validSwingPoints.length}`);
       }
+      
+      // Track this mutation
+      this.trackSwingPointMutation('filter', null);
     }
     
     // Update the array with only valid points
@@ -421,9 +368,17 @@ export class BollingerFibonacciHybridBot {
         index: centerIndex,
         price: centerCandle.high,
         type: 'high',
-        timestamp: centerCandle.timestamp
+        timestamp: centerCandle.timestamp,
+        createdAt: Date.now(),
+        source: 'swing-detection'
       };
+      
+      // Track this mutation
+      this.trackSwingPointMutation('add', newSwingHigh);
+      
+      // Add to array
       this.swingPoints.push(newSwingHigh);
+      
       if (this.debugMode) console.log(`Added new swing high at index ${centerIndex}, price ${centerCandle.high}`);
     }
 
@@ -432,17 +387,31 @@ export class BollingerFibonacciHybridBot {
         index: centerIndex,
         price: centerCandle.low,
         type: 'low',
-        timestamp: centerCandle.timestamp
+        timestamp: centerCandle.timestamp,
+        createdAt: Date.now(),
+        source: 'swing-detection'
       };
+      
+      // Track this mutation
+      this.trackSwingPointMutation('add', newSwingLow);
+      
+      // Add to array
       this.swingPoints.push(newSwingLow);
+      
       if (this.debugMode) console.log(`Added new swing low at index ${centerIndex}, price ${centerCandle.low}`);
     }
 
     // Keep only recent swing points and filter out any invalid entries again
+    const beforePruneLength = this.swingPoints.length;
     this.swingPoints = this.swingPoints.filter(point => 
       this.isValidSwingPoint(point) &&
       currentIndex - point.index <= this.config.swingLookback * 10
     );
+    
+    // Track pruning
+    if (beforePruneLength !== this.swingPoints.length) {
+      this.trackSwingPointMutation('prune', null);
+    }
     
     if (this.debugMode && (isSwingHigh || isSwingLow)) {
       console.log(`After update, swingPoints count: ${this.swingPoints.length}`);
@@ -452,60 +421,72 @@ export class BollingerFibonacciHybridBot {
       if (invalidPoints.length > 0) {
         console.error(`⚠️ CRITICAL: Still have ${invalidPoints.length} invalid points after filtering!`);
         console.log("Invalid points:", invalidPoints);
+        
+        // Force clean the array again
+        this.swingPoints = this.swingPoints.filter(point => this.isValidSwingPoint(point));
+        this.trackSwingPointMutation('emergency-filter', null);
       }
     }
   }
 
   private updateFibonacciLevels() {
-    // Enhanced type guard for swing points filtering with explicit null checks
-    const isValidSwingPoint = (p: SwingPoint | null | undefined): p is SwingPoint => {
-      return p !== null && p !== undefined && 
-             typeof p === 'object' && 
-             'type' in p && 
-             typeof p.type === 'string' &&
-             (p.type === 'high' || p.type === 'low') &&
-             'price' in p && 
-             'index' in p && 
-             'timestamp' in p;
-    };
-
-    // Filter swing points to ensure they're valid
-    const validSwingPoints = this.swingPoints.filter(isValidSwingPoint);
-    
-    if (validSwingPoints.length < 2) {
-      if (this.debugMode) console.log("Not enough valid swing points for Fibonacci levels");
-      return;
-    }
-
-    const recentHighs = validSwingPoints.filter(p => p.type === 'high').slice(-2);
-    const recentLows = validSwingPoints.filter(p => p.type === 'low').slice(-2);
-
-    if (recentHighs.length >= 1 && recentLows.length >= 1) {
-      const lastHigh = recentHighs[recentHighs.length - 1];
-      const lastLow = recentLows[recentLows.length - 1];
+    try {
+      // CRITICAL: Clean up any null or undefined entries from swingPoints array first
+      const originalLength = this.swingPoints.length;
+      const validSwingPoints = this.swingPoints.filter(point => this.isValidSwingPoint(point));
       
-      if (!lastHigh || !lastLow) {
-        if (this.debugMode) console.log("Missing last high or low swing point");
+      // If we lost any points during filtering, log it
+      if (validSwingPoints.length !== originalLength) {
+        if (this.debugMode) {
+          console.log(`⚠️ Removed ${originalLength - validSwingPoints.length} invalid swing points during Fibonacci update`);
+        }
+        
+        // Track this mutation
+        this.trackSwingPointMutation('fib-update-filter', null);
+        
+        // Update the array with only valid points
+        this.swingPoints = validSwingPoints;
+      }
+      
+      if (this.swingPoints.length < 2) {
+        if (this.debugMode) console.log("Not enough valid swing points for Fibonacci levels");
         return;
       }
 
-      // Calculate Fibonacci levels between the most recent swing high and low
-      const high = Math.max(lastHigh.price, lastLow.price);
-      const low = Math.min(lastHigh.price, lastLow.price);
-      const range = high - low;
-      
-      if (range <= 0) {
-        if (this.debugMode) console.log(`Invalid range: ${range} for Fibonacci calculation`);
-        return;
-      }
+      const recentHighs = this.swingPoints.filter(p => this.isValidSwingPoint(p) && p.type === 'high').slice(-2);
+      const recentLows = this.swingPoints.filter(p => this.isValidSwingPoint(p) && p.type === 'low').slice(-2);
 
-      this.currentFibLevels = this.config.fibRetracementLevels.map(level => ({
-        level,
-        price: high - (range * level),
-        name: this.getFibonacciLevelName(level)
-      }));
-      
-      if (this.debugMode) console.log(`Updated Fibonacci levels between ${high} and ${low}`);
+      if (recentHighs.length >= 1 && recentLows.length >= 1) {
+        const lastHigh = recentHighs[recentHighs.length - 1];
+        const lastLow = recentLows[recentLows.length - 1];
+        
+        if (!lastHigh || !lastLow) {
+          if (this.debugMode) console.log("Missing last high or low swing point");
+          return;
+        }
+
+        // Calculate Fibonacci levels between the most recent swing high and low
+        const high = Math.max(lastHigh.price, lastLow.price);
+        const low = Math.min(lastHigh.price, lastLow.price);
+        const range = high - low;
+        
+        if (range <= 0) {
+          if (this.debugMode) console.log(`Invalid range: ${range} for Fibonacci calculation`);
+          return;
+        }
+
+        this.currentFibLevels = this.config.fibRetracementLevels.map(level => ({
+          level,
+          price: high - (range * level),
+          name: this.getFibonacciLevelName(level)
+        }));
+        
+        if (this.debugMode) console.log(`Updated Fibonacci levels between ${high} and ${low}`);
+      }
+    } catch (error) {
+      console.error("Error in updateFibonacciLevels:", error);
+      // Reset Fibonacci levels to prevent further errors
+      this.currentFibLevels = [];
     }
   }
 
@@ -523,39 +504,144 @@ export class BollingerFibonacciHybridBot {
   }
 
   private isInGoldenZone(price: number, direction: 'long' | 'short'): boolean {
-    if (!this.currentFibLevels || !Array.isArray(this.currentFibLevels) || this.currentFibLevels.length === 0) {
-      if (this.debugMode) console.log("No Fibonacci levels available for golden zone check");
+    try {
+      if (!this.currentFibLevels || !Array.isArray(this.currentFibLevels) || this.currentFibLevels.length === 0) {
+        if (this.debugMode) console.log("No Fibonacci levels available for golden zone check");
+        return false;
+      }
+
+      const goldenZoneLow = this.currentFibLevels.find(l => 
+        l && typeof l.level === 'number' && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
+      );
+      
+      const goldenZoneHigh = this.currentFibLevels.find(l => 
+        l && typeof l.level === 'number' && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
+      );
+      
+      if (!goldenZoneLow || !goldenZoneHigh) {
+        if (this.debugMode) console.log("Golden zone levels not found in Fibonacci levels");
+        return false;
+      }
+
+      // For long positions, look for price in golden zone during pullback
+      if (direction === 'long') {
+        const inZone = price >= goldenZoneLow.price && price <= goldenZoneHigh.price;
+        if (this.debugMode && inZone) console.log(`Price ${price} is in LONG golden zone (${goldenZoneLow.price}-${goldenZoneHigh.price})`);
+        return inZone;
+      }
+      
+      // For short positions, look for price in golden zone during bounce
+      if (direction === 'short') {
+        const inZone = price >= goldenZoneLow.price && price <= goldenZoneHigh.price;
+        if (this.debugMode && inZone) console.log(`Price ${price} is in SHORT golden zone (${goldenZoneLow.price}-${goldenZoneHigh.price})`);
+        return inZone;
+      }
+
+      return false;
+    } catch (error) {
+      console.error("Error in isInGoldenZone:", error);
       return false;
     }
+  }
 
-    const goldenZoneLow = this.currentFibLevels.find(l => 
-      l && typeof l.level === 'number' && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
-    );
-    
-    const goldenZoneHigh = this.currentFibLevels.find(l => 
-      l && typeof l.level === 'number' && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
-    );
-    
-    if (!goldenZoneLow || !goldenZoneHigh) {
-      if (this.debugMode) console.log("Golden zone levels not found in Fibonacci levels");
-      return false;
-    }
+  private generateHybridSignal(
+    candle: Candle,
+    prevCandle: Candle,
+    band: BollingerBands,
+    prevBand: BollingerBands,
+    volumeMA: number,
+    index: number,
+    candles: Candle[]
+  ): HybridSignal | null {
+    try {
+      // Step 1: Check for Bollinger Band breakout
+      const longBreakout = this.config.requireBollingerBreakout ? 
+        (prevCandle.close <= prevBand.upper && candle.close > band.upper) : true;
+      
+      const shortBreakout = this.config.requireBollingerBreakout ? 
+        (prevCandle.close >= prevBand.lower && candle.close < band.lower) : true;
 
-    // For long positions, look for price in golden zone during pullback
-    if (direction === 'long') {
-      const inZone = price >= goldenZoneLow.price && price <= goldenZoneHigh.price;
-      if (this.debugMode && inZone) console.log(`Price ${price} is in LONG golden zone (${goldenZoneLow.price}-${goldenZoneHigh.price})`);
-      return inZone;
-    }
-    
-    // For short positions, look for price in golden zone during bounce
-    if (direction === 'short') {
-      const inZone = price >= goldenZoneLow.price && price <= goldenZoneHigh.price;
-      if (this.debugMode && inZone) console.log(`Price ${price} is in SHORT golden zone (${goldenZoneLow.price}-${goldenZoneHigh.price})`);
-      return inZone;
-    }
+      // Step 2: Check for Fibonacci retracement to golden zone
+      const fibRetracementLong = this.config.requireFibonacciRetracement ? 
+        this.isInGoldenZone(candle.close, 'long') : true;
+      
+      const fibRetracementShort = this.config.requireFibonacciRetracement ? 
+        this.isInGoldenZone(candle.close, 'short') : true;
 
-    return false;
+      // Step 3: Volume confirmation
+      const volumeConfirmation = this.config.requireVolumeConfirmation ? 
+        (volumeMA > 0 && candle.volume > volumeMA * this.config.volumeThreshold) : true;
+
+      // Step 4: Momentum confirmation (price action)
+      const momentumConfirmationLong = this.config.requireMomentumConfirmation ? 
+        (candle.close > candle.open && candle.close > prevCandle.close) : true;
+      
+      const momentumConfirmationShort = this.config.requireMomentumConfirmation ? 
+        (candle.close < candle.open && candle.close < prevCandle.close) : true;
+
+      // Generate long signal
+      if (longBreakout && fibRetracementLong && volumeConfirmation && momentumConfirmationLong) {
+        const strength = this.calculateSignalStrength(
+          longBreakout, fibRetracementLong, volumeConfirmation, momentumConfirmationLong
+        );
+
+        if (this.debugMode) console.log(`Long signal generated at index ${index} with strength ${strength}`);
+
+        return {
+          type: 'long',
+          strength,
+          bollingerBreakout: longBreakout,
+          fibonacciRetracement: fibRetracementLong,
+          volumeConfirmation,
+          momentumConfirmation: momentumConfirmationLong,
+          entryPrice: candle.close,
+          stopLoss: candle.close * (1 - this.config.stopLossPercent),
+          takeProfit: candle.close * (1 + this.config.profitTarget)
+        };
+      }
+
+      // Generate short signal
+      if (shortBreakout && fibRetracementShort && volumeConfirmation && momentumConfirmationShort) {
+        const strength = this.calculateSignalStrength(
+          shortBreakout, fibRetracementShort, volumeConfirmation, momentumConfirmationShort
+        );
+
+        if (this.debugMode) console.log(`Short signal generated at index ${index} with strength ${strength}`);
+
+        return {
+          type: 'short',
+          strength,
+          bollingerBreakout: shortBreakout,
+          fibonacciRetracement: fibRetracementShort,
+          volumeConfirmation,
+          momentumConfirmation: momentumConfirmationShort,
+          entryPrice: candle.close,
+          stopLoss: candle.close * (1 + this.config.stopLossPercent),
+          takeProfit: candle.close * (1 - this.config.profitTarget)
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Error in generateHybridSignal:", error);
+      return null;
+    }
+  }
+
+  private calculateSignalStrength(
+    bollingerBreakout: boolean,
+    fibonacciRetracement: boolean,
+    volumeConfirmation: boolean,
+    momentumConfirmation: boolean
+  ): number {
+    let strength = 0;
+    
+    if (bollingerBreakout) strength += 30; // BB breakout is strong signal
+    if (fibonacciRetracement) strength += 25; // Fibonacci retracement adds precision
+    if (volumeConfirmation) strength += 25; // Volume confirms the move
+    if (momentumConfirmation) strength += 20; // Momentum confirms direction
+    
+    return strength;
   }
 
   private shouldClosePosition(candle: Candle, index: number, candles: Candle[]): boolean {
@@ -785,6 +871,18 @@ export class BollingerFibonacciHybridBot {
       lastTradeTime,
       tradingPeriodDays,
       averageTradesPerDay
+    };
+  }
+  
+  // For debugging - get a snapshot of the current state
+  public getDebugSnapshot(): any {
+    return {
+      swingPoints: this.swingPoints.map(p => ({...p})),
+      swingPointCount: this.swingPoints.length,
+      validSwingPointCount: this.swingPoints.filter(p => this.isValidSwingPoint(p)).length,
+      currentFibLevels: this.currentFibLevels ? [...this.currentFibLevels] : null,
+      swingPointMutations: this.swingPointMutations.slice(-10), // Last 10 mutations
+      trades: this.trades.length
     };
   }
 }

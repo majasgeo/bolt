@@ -31,7 +31,8 @@ import { EnhancedBollingerPanel } from './components/EnhancedBollingerPanel';
 import { BollingerFibonacciHybridPanel } from './components/BollingerFibonacciHybridPanel';
 import { HybridOptimizationPanel } from './components/HybridOptimizationPanel';
 import { HybridResults } from './components/HybridResults';
-import { Bot, TrendingUp, Zap, BarChart3, Upload, Activity, Settings, Layers } from 'lucide-react';
+import { Bot, TrendingUp, Zap, BarChart3, Upload, Activity, Settings, Layers, AlertTriangle } from 'lucide-react';
+import { runSwingPointTest } from './utils/swingPointDebugger';
 
 function App() {
   // SINGLE SOURCE OF TRUTH - One config object per strategy
@@ -145,6 +146,8 @@ function App() {
   const [ultraFastOptimizationResults, setUltraFastOptimizationResults] = useState<UltraFastOptimizationResult[]>([]);
   const [hybridOptimizationResults, setHybridOptimizationResults] = useState<HybridOptimizationResult[]>([]);
   const [activeStrategy, setActiveStrategy] = useState<'bollinger' | 'daytrading' | 'fibonacci' | 'ultrafast' | 'enhanced' | 'hybrid'>('bollinger');
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   // Calculate bands when candles or config changes
   useEffect(() => {
@@ -190,6 +193,12 @@ function App() {
     setFibonacciOptimizationResults([]);
     setUltraFastOptimizationResults([]);
     setHybridOptimizationResults([]);
+    
+    // Run swing point test on new data
+    if (showDebugInfo) {
+      const testResults = runSwingPointTest(newCandles);
+      setDebugInfo(testResults);
+    }
   };
 
   const runBacktest = async () => {
@@ -257,6 +266,15 @@ function App() {
       const fibonacciBands = calculateBollingerBands(candles, 20, 2, 0);
       const backtestResults = fibonacciBot.backtest(candles, fibonacciBands);
       console.log("Fibonacci backtest results:", backtestResults);
+      
+      // Get debug snapshot if debug mode is enabled
+      if (showDebugInfo) {
+        const snapshot = (fibonacciBot as any).getDebugSnapshot?.();
+        if (snapshot) {
+          setDebugInfo(snapshot);
+        }
+      }
+      
       setResults(backtestResults);
     } catch (error) {
       console.error('Fibonacci backtest failed:', error);
@@ -338,6 +356,15 @@ function App() {
       const hybridBands = calculateBollingerBands(candles, config.period, config.stdDev, config.offset);
       const backtestResults = hybridBot.backtest(candles, hybridBands);
       console.log("Hybrid backtest results:", backtestResults);
+      
+      // Get debug snapshot if debug mode is enabled
+      if (showDebugInfo) {
+        const snapshot = (hybridBot as any).getDebugSnapshot?.();
+        if (snapshot) {
+          setDebugInfo(snapshot);
+        }
+      }
+      
       setResults(backtestResults);
     } catch (error) {
       console.error('Hybrid backtest failed:', error);
@@ -836,6 +863,56 @@ function App() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Debug Mode Toggle */}
+        <div className="mb-4 flex justify-end">
+          <button
+            onClick={() => setShowDebugInfo(!showDebugInfo)}
+            className={`flex items-center px-3 py-1 rounded text-sm font-medium ${
+              showDebugInfo ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-700'
+            }`}
+          >
+            <AlertTriangle className="h-4 w-4 mr-1" />
+            {showDebugInfo ? 'Hide Debug Info' : 'Show Debug Info'}
+          </button>
+        </div>
+        
+        {/* Debug Info Panel */}
+        {showDebugInfo && debugInfo && (
+          <div className="mb-6 bg-gray-50 border border-gray-200 rounded-xl p-4">
+            <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center">
+              <AlertTriangle className="h-5 w-5 mr-2 text-red-600" />
+              Swing Point Debug Information
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <h4 className="font-medium text-gray-800 mb-1">Swing Points</h4>
+                <div className="bg-white p-2 rounded border border-gray-200 text-xs font-mono h-40 overflow-auto">
+                  <pre>{JSON.stringify(debugInfo.swingPoints || [], null, 2)}</pre>
+                </div>
+              </div>
+              <div>
+                <h4 className="font-medium text-gray-800 mb-1">Mutation Stats</h4>
+                <div className="bg-white p-2 rounded border border-gray-200 text-xs font-mono h-40 overflow-auto">
+                  <pre>{JSON.stringify(debugInfo.swingPointMutations || debugInfo.mutationStats || {}, null, 2)}</pre>
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <h4 className="font-medium text-gray-800 mb-1">Current State</h4>
+                <div className="bg-white p-2 rounded border border-gray-200 text-xs font-mono h-40 overflow-auto">
+                  <pre>{JSON.stringify({
+                    swingPointCount: debugInfo.swingPointCount,
+                    validSwingPointCount: debugInfo.validSwingPointCount,
+                    currentFibRetracement: debugInfo.currentFibRetracement,
+                    currentFibLevels: debugInfo.currentFibLevels,
+                    trades: debugInfo.trades,
+                    stressTestStats: debugInfo.stressTestStats
+                  }, null, 2)}</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           {/* Data Source Panel */}
           <div className="lg:col-span-1">
