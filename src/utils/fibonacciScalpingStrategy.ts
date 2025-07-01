@@ -270,18 +270,14 @@ export class FibonacciScalpingBot {
     
     // Enhanced type guard for swing points filtering with explicit null checks
     const isValidSwingPoint = (p: SwingPoint | null | undefined): p is SwingPoint => {
-      return p !== null && 
-             p !== undefined && 
+      return p !== null && p !== undefined && 
              typeof p === 'object' && 
              'type' in p && 
              typeof p.type === 'string' &&
              (p.type === 'high' || p.type === 'low') &&
              'price' in p && 
-             typeof p.price === 'number' &&
              'index' in p && 
-             typeof p.index === 'number' &&
-             'timestamp' in p &&
-             typeof p.timestamp === 'number';
+             'timestamp' in p;
     };
 
     // Fix: Add explicit null check before accessing 'type' property

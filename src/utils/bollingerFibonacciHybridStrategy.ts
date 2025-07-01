@@ -360,23 +360,25 @@ export class BollingerFibonacciHybridBot {
   }
 
   private updateFibonacciLevels() {
-    // Clean up any null or undefined entries from swingPoints array first
-    this.swingPoints = this.swingPoints.filter(point => 
-      point !== null && 
-      point !== undefined && 
-      typeof point === 'object' && 
-      'type' in point && 
-      typeof point.type === 'string' &&
-      (point.type === 'high' || point.type === 'low') &&
-      'price' in point && 
-      'index' in point && 
-      'timestamp' in point
-    );
+    // Enhanced type guard for swing points filtering with explicit null checks
+    const isValidSwingPoint = (p: SwingPoint | null | undefined): p is SwingPoint => {
+      return p !== null && p !== undefined && 
+             typeof p === 'object' && 
+             'type' in p && 
+             typeof p.type === 'string' &&
+             (p.type === 'high' || p.type === 'low') &&
+             'price' in p && 
+             'index' in p && 
+             'timestamp' in p;
+    };
 
-    if (this.swingPoints.length < 2) return;
+    // Filter swing points to ensure they're valid
+    const validSwingPoints = this.swingPoints.filter(isValidSwingPoint);
+    
+    if (validSwingPoints.length < 2) return;
 
-    const recentHighs = this.swingPoints.filter(p => p && p.type === 'high').slice(-2);
-    const recentLows = this.swingPoints.filter(p => p && p.type === 'low').slice(-2);
+    const recentHighs = validSwingPoints.filter(p => p.type === 'high').slice(-2);
+    const recentLows = validSwingPoints.filter(p => p.type === 'low').slice(-2);
 
     if (recentHighs.length >= 1 && recentLows.length >= 1) {
       const lastHigh = recentHighs[recentHighs.length - 1];
