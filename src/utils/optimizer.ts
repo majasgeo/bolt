@@ -60,6 +60,7 @@ export class StrategyOptimizer {
     console.log(`🚀 Starting comprehensive optimization: ${totalCombinations.toLocaleString()} combinations`);
     console.log(`📊 Using EXACT same calculation method as manual backtest`);
     console.log(`📊 Optimizing for ${this.isSecondsData ? 'SECONDS' : 'MINUTE/HOUR'} timeframe data`);
+    console.log(`📊 Data size: ${this.candles.length.toLocaleString()} candles`);
     
     if (filters) {
       console.log(`📊 Filters applied:`, {
@@ -71,127 +72,154 @@ export class StrategyOptimizer {
       });
     }
 
+    // For large datasets, we'll use a more efficient approach
+    const isLargeDataset = this.candles.length > 50000;
+    if (isLargeDataset) {
+      console.log(`⚠️ Large dataset detected (${this.candles.length.toLocaleString()} candles). Using optimized processing.`);
+    }
+
+    // Process in batches to prevent UI freezing
+    const batchSize = isLargeDataset ? 10 : 50;
+    let batch = 0;
+    let batchTests = 0;
+    let allTests = [];
+
+    // Create all test configurations first
     for (const period of smaRange) {
       for (const stdDev of stdDevValues) {
         for (const offset of offsetValues) {
           for (const leverage of leverageValues) {
-            currentTest++;
-            
-            // Create EXACT same config as manual backtest
-            const config: TradingConfig = {
-              period,
-              stdDev,
-              offset,
-              maxLeverage: leverage,
-              initialCapital: this.baseConfig.initialCapital,
-              enableLongPositions: this.baseConfig.enableLongPositions,
-              enableShortPositions: this.baseConfig.enableShortPositions
-            };
-
-            const currentConfigStr = `SMA ${period}, StdDev ${stdDev}, Offset ${offset}, Leverage ${leverage}x`;
-            
-            // Calculate estimated time remaining
-            const elapsed = Date.now() - this.startTime;
-            const avgTimePerTest = elapsed / currentTest;
-            const remaining = (totalCombinations - currentTest) * avgTimePerTest;
-            const estimatedTimeRemaining = this.formatTimeRemaining(remaining);
-            
-            try {
-              // Use EXACT same calculation as manual backtest
-              const bands = calculateBollingerBands(this.candles, period, stdDev, offset);
-              const backtester = new Backtester(config);
-              const backtestResult = backtester.backtest(this.candles, bands);
-
-              // Calculate total return EXACTLY the same way as manual backtest
-              const totalReturn = config.initialCapital > 0 ? backtestResult.totalPnL / config.initialCapital : 0;
-              
-              // Debug logging for first few results to verify calculation
-              if (currentTest <= 5) {
-                console.log(`🔍 Debug Test ${currentTest}:`, {
-                  config: `SMA ${period}, StdDev ${stdDev}, Offset ${offset}, Leverage ${leverage}x`,
-                  initialCapital: config.initialCapital,
-                  totalPnL: backtestResult.totalPnL,
-                  totalReturn: (totalReturn * 100).toFixed(2) + '%',
-                  totalTrades: backtestResult.totalTrades,
-                  winRate: (backtestResult.winRate * 100).toFixed(1) + '%'
-                });
-              }
-              
-              // Apply filters before adding to results
-              if (this.passesFilters(backtestResult, totalReturn, filters)) {
-                // Calculate optimization score (weighted combination of metrics)
-                const score = this.calculateOptimizationScore(backtestResult, totalReturn, leverage);
-
-                const optimizationResult: OptimizationResult = {
-                  period,
-                  stdDev,
-                  offset,
-                  leverage,
-                  totalReturn,
-                  totalPnL: backtestResult.totalPnL,
-                  winRate: backtestResult.winRate,
-                  totalTrades: backtestResult.totalTrades,
-                  maxDrawdown: backtestResult.maxDrawdown,
-                  sharpeRatio: backtestResult.sharpeRatio,
-                  score,
-                  tradingPeriodDays: backtestResult.tradingPeriodDays,
-                  averageTradesPerDay: backtestResult.averageTradesPerDay
-                };
-
-                results.push(optimizationResult);
-                
-                // Sort results immediately to keep best at top
-                results.sort((a, b) => b.score - a.score);
-                
-                // Limit results array size to prevent memory issues
-                if (results.length > 1000) {
-                  results.splice(1000);
-                }
-              } else {
-                filteredResults++;
-              }
-
-              // Update progress with current best result
-              if (this.onProgress) {
-                // Get the actual best result from sorted results
-                const currentBest = results.length > 0 ? results[0] : undefined;
-                
-                this.onProgress({
-                  current: currentTest,
-                  total: totalCombinations,
-                  currentConfig: currentConfigStr,
-                  isRunning: true,
-                  results: results,
-                  bestResult: currentBest,
-                  estimatedTimeRemaining
-                });
-              }
-
-              // Log progress every 1000 tests
-              if (currentTest % 1000 === 0) {
-                console.log(`✅ Completed ${currentTest.toLocaleString()}/${totalCombinations.toLocaleString()} tests (${((currentTest/totalCombinations)*100).toFixed(1)}%)`);
-                console.log(`📊 Results: ${results.length.toLocaleString()} passed filters, ${filteredResults.toLocaleString()} filtered out`);
-                console.log(`⏱️ Estimated time remaining: ${estimatedTimeRemaining}`);
-                if (results.length > 0) {
-                  const best = results[0]; // Already sorted
-                  console.log(`🏆 Current best: ${best?.totalReturn ? (best.totalReturn * 100).toFixed(1) : 'N/A'}% return (SMA ${best?.period}, StdDev ${best?.stdDev}, Offset ${best?.offset}, Leverage ${best?.leverage}x)`);
-                  if (best?.tradingPeriodDays) {
-                    console.log(`📅 Trading period: ${this.formatDuration(best.tradingPeriodDays)}, Trades/Day: ${best.averageTradesPerDay?.toFixed(2) || 'N/A'}`);
-                  }
-                }
-              }
-
-              // Small delay to prevent UI blocking
-              if (currentTest % 50 === 0) {
-                await new Promise(resolve => setTimeout(resolve, 1));
-              }
-
-            } catch (error) {
-              console.warn(`Failed to test configuration: ${currentConfigStr}`, error);
-            }
+            allTests.push({ period, stdDev, offset, leverage });
           }
         }
       }
+    }
+
+    console.log(`📊 Created ${allTests.length.toLocaleString()} test configurations`);
+
+    // Process tests in batches
+    while (batch * batchSize < allTests.length) {
+      const startIdx = batch * batchSize;
+      const endIdx = Math.min((batch + 1) * batchSize, allTests.length);
+      const batchTests = allTests.slice(startIdx, endIdx);
+      
+      console.log(`📊 Processing batch ${batch + 1}/${Math.ceil(allTests.length / batchSize)} (tests ${startIdx + 1}-${endIdx})`);
+      
+      for (const test of batchTests) {
+        const { period, stdDev, offset, leverage } = test;
+        currentTest++;
+        
+        // Create EXACT same config as manual backtest
+        const config: TradingConfig = {
+          period,
+          stdDev,
+          offset,
+          maxLeverage: leverage,
+          initialCapital: this.baseConfig.initialCapital,
+          enableLongPositions: this.baseConfig.enableLongPositions,
+          enableShortPositions: this.baseConfig.enableShortPositions
+        };
+
+        const currentConfigStr = `SMA ${period}, StdDev ${stdDev}, Offset ${offset}, Leverage ${leverage}x`;
+        
+        // Calculate estimated time remaining
+        const elapsed = Date.now() - this.startTime;
+        const avgTimePerTest = elapsed / currentTest;
+        const remaining = (totalCombinations - currentTest) * avgTimePerTest;
+        const estimatedTimeRemaining = this.formatTimeRemaining(remaining);
+        
+        try {
+          // Use EXACT same calculation as manual backtest
+          const bands = calculateBollingerBands(this.candles, period, stdDev, offset);
+          const backtester = new Backtester(config);
+          const backtestResult = backtester.backtest(this.candles, bands);
+
+          // Calculate total return EXACTLY the same way as manual backtest
+          const totalReturn = config.initialCapital > 0 ? backtestResult.totalPnL / config.initialCapital : 0;
+          
+          // Debug logging for first few results to verify calculation
+          if (currentTest <= 5) {
+            console.log(`🔍 Debug Test ${currentTest}:`, {
+              config: `SMA ${period}, StdDev ${stdDev}, Offset ${offset}, Leverage ${leverage}x`,
+              initialCapital: config.initialCapital,
+              totalPnL: backtestResult.totalPnL,
+              totalReturn: (totalReturn * 100).toFixed(2) + '%',
+              totalTrades: backtestResult.totalTrades,
+              winRate: (backtestResult.winRate * 100).toFixed(1) + '%'
+            });
+          }
+          
+          // Apply filters before adding to results
+          if (this.passesFilters(backtestResult, totalReturn, filters)) {
+            // Calculate optimization score (weighted combination of metrics)
+            const score = this.calculateOptimizationScore(backtestResult, totalReturn, leverage);
+
+            const optimizationResult: OptimizationResult = {
+              period,
+              stdDev,
+              offset,
+              leverage,
+              totalReturn,
+              totalPnL: backtestResult.totalPnL,
+              winRate: backtestResult.winRate,
+              totalTrades: backtestResult.totalTrades,
+              maxDrawdown: backtestResult.maxDrawdown,
+              sharpeRatio: backtestResult.sharpeRatio,
+              score,
+              tradingPeriodDays: backtestResult.tradingPeriodDays,
+              averageTradesPerDay: backtestResult.averageTradesPerDay
+            };
+
+            results.push(optimizationResult);
+            
+            // Sort results immediately to keep best at top
+            results.sort((a, b) => b.score - a.score);
+            
+            // Limit results array size to prevent memory issues
+            if (results.length > 1000) {
+              results.splice(1000);
+            }
+          } else {
+            filteredResults++;
+          }
+
+          // Update progress with current best result
+          if (this.onProgress) {
+            // Get the actual best result from sorted results
+            const currentBest = results.length > 0 ? results[0] : undefined;
+            
+            this.onProgress({
+              current: currentTest,
+              total: totalCombinations,
+              currentConfig: currentConfigStr,
+              isRunning: true,
+              results: results,
+              bestResult: currentBest,
+              estimatedTimeRemaining
+            });
+          }
+
+          // Log progress every 1000 tests
+          if (currentTest % 1000 === 0) {
+            console.log(`✅ Completed ${currentTest.toLocaleString()}/${totalCombinations.toLocaleString()} tests (${((currentTest/totalCombinations)*100).toFixed(1)}%)`);
+            console.log(`📊 Results: ${results.length.toLocaleString()} passed filters, ${filteredResults.toLocaleString()} filtered out`);
+            console.log(`⏱️ Estimated time remaining: ${estimatedTimeRemaining}`);
+            if (results.length > 0) {
+              const best = results[0]; // Already sorted
+              console.log(`🏆 Current best: ${best?.totalReturn ? (best.totalReturn * 100).toFixed(1) : 'N/A'}% return (SMA ${best?.period}, StdDev ${best?.stdDev}, Offset ${best?.offset}, Leverage ${best?.leverage}x)`);
+              if (best?.tradingPeriodDays) {
+                console.log(`📅 Trading period: ${this.formatDuration(best.tradingPeriodDays)}, Trades/Day: ${best.averageTradesPerDay?.toFixed(2) || 'N/A'}`);
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(`Failed to test configuration: ${currentConfigStr}`, error);
+        }
+      }
+      
+      // Yield to UI thread between batches
+      await new Promise(resolve => setTimeout(resolve, 10));
+      batch++;
     }
 
     // Final sort by score (best first)
