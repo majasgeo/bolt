@@ -123,7 +123,7 @@ export class BollingerFibonacciHybridBot {
 
       // Generate hybrid signals with proper null checks
       const signal = this.generateHybridSignal(
-        candle, prevCandle, band, prevBand, volumeMA[i], i, candles
+        candle, prevCandle, band, prevBand, volumeMA[i] || 0, i, candles
       );
 
       // Entry logic based on hybrid signals
@@ -287,6 +287,19 @@ export class BollingerFibonacciHybridBot {
   }
 
   private updateSwingPoints(candles: Candle[], currentIndex: number) {
+    // Clean up any null or undefined entries from swingPoints array first
+    this.swingPoints = this.swingPoints.filter(point => 
+      point !== null && 
+      point !== undefined && 
+      typeof point === 'object' && 
+      'type' in point && 
+      typeof point.type === 'string' &&
+      (point.type === 'high' || point.type === 'low') &&
+      'price' in point && 
+      'index' in point && 
+      'timestamp' in point
+    );
+
     if (currentIndex < this.config.swingLookback * 2) return;
 
     const lookback = this.config.swingLookback;
@@ -347,6 +360,19 @@ export class BollingerFibonacciHybridBot {
   }
 
   private updateFibonacciLevels() {
+    // Clean up any null or undefined entries from swingPoints array first
+    this.swingPoints = this.swingPoints.filter(point => 
+      point !== null && 
+      point !== undefined && 
+      typeof point === 'object' && 
+      'type' in point && 
+      typeof point.type === 'string' &&
+      (point.type === 'high' || point.type === 'low') &&
+      'price' in point && 
+      'index' in point && 
+      'timestamp' in point
+    );
+
     if (this.swingPoints.length < 2) return;
 
     const recentHighs = this.swingPoints.filter(p => p && p.type === 'high').slice(-2);

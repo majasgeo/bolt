@@ -102,10 +102,9 @@ export class FibonacciScalpingBot {
 
       // Entry logic with null checks
       if (!this.currentTrade && this.currentFibRetracement) {
-        // Make sure we have valid swing points before checking entry conditions
-        if (this.isLongEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
+        if (this.config.enableLongPositions && this.isLongEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
           this.enterLongPosition(candle, i);
-        } else if (this.isShortEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
+        } else if (this.config.enableShortPositions && this.isShortEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
           this.enterShortPosition(candle, i);
         }
       }
@@ -271,13 +270,18 @@ export class FibonacciScalpingBot {
     
     // Enhanced type guard for swing points filtering with explicit null checks
     const isValidSwingPoint = (p: SwingPoint | null | undefined): p is SwingPoint => {
-      return p !== null && p !== undefined && 
+      return p !== null && 
+             p !== undefined && 
              typeof p === 'object' && 
              'type' in p && 
+             typeof p.type === 'string' &&
+             (p.type === 'high' || p.type === 'low') &&
              'price' in p && 
+             typeof p.price === 'number' &&
              'index' in p && 
+             typeof p.index === 'number' &&
              'timestamp' in p &&
-             (p.type === 'high' || p.type === 'low');
+             typeof p.timestamp === 'number';
     };
 
     // Fix: Add explicit null check before accessing 'type' property
@@ -296,7 +300,6 @@ export class FibonacciScalpingBot {
       const lastSwingHigh = recentSwingHighs[recentSwingHighs.length - 1];
       const lastSwingLow = recentSwingLows[recentSwingLows.length - 1];
       
-      // Additional null checks before using the swing points
       if (!lastSwingHigh || !lastSwingLow) return;
 
       // Structure break to upside
