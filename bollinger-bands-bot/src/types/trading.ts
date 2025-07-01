@@ -123,6 +123,9 @@ export interface CSVColumnMapping {
   volume?: string;
   bid?: string;
   ask?: string;
+  last?: string;
+  symbol?: string;
+  exchange?: string;
 }
 
 export interface TimeframeOption {

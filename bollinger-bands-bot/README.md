@@ -1,26 +1,28 @@
-# Bollinger Bands Trading Bot
+# Universal Bollinger Bands Trading Bot
 
-A standalone trading bot application focused on the Bollinger Bands strategy with backtesting and optimization capabilities.
+A comprehensive trading bot application focused on the Bollinger Bands strategy with universal data support, backtesting, and multi-timeframe optimization capabilities.
 
 ## 🚀 Project Overview
 
-This repository contains a focused trading bot built with React, TypeScript, and advanced backtesting capabilities. The project is dedicated to the Bollinger Bands strategy, providing a clean and efficient interface for strategy testing and optimization.
+This repository contains a powerful and flexible trading bot built with React, TypeScript, and advanced backtesting capabilities. The project is dedicated to the Bollinger Bands strategy, providing a clean and efficient interface for strategy testing and optimization across any asset class and timeframe.
 
-## 📊 Features
+## 📊 Key Features
 
-- **Bollinger Bands Strategy**: Classic breakout strategy with customizable parameters
-- **Auto-Optimization**: Test thousands of parameter combinations to find the best settings
-- **Backtesting Engine**: Comprehensive backtesting with detailed metrics
+- **Universal CSV Support**: Import data from any asset class (crypto, stocks, forex, commodities)
+- **Flexible Data Handling**: Support for both OHLCV candle data and tick data (bid/ask/last)
+- **Any Timeframe**: Works with seconds, minutes, hours, days - any granularity
+- **Tick Data Aggregation**: Convert tick data to any timeframe candles
+- **Multi-Timeframe Optimization**: Find the optimal timeframe and parameters for your asset
+- **Comprehensive Backtesting**: Detailed metrics, trade logs, and performance analysis
 - **Visual Charts**: See entry/exit points on price charts
-- **CSV Import**: Support for various data formats and timeframes
-- **Multiple Timeframe Support**: Works with seconds, minutes, hours, and daily data
-- **Risk Management**: Built-in stop losses and position sizing
+- **Custom Column Mapping**: Map non-standard CSV headers to the required fields
 
 ## 🛠️ Technical Stack
 
 - **Frontend**: React 18 + TypeScript + Tailwind CSS
 - **Charts**: HTML5 Canvas for high-performance rendering
 - **Data Processing**: Papa Parse for CSV handling
+- **Date Handling**: date-fns for timestamp processing
 - **Icons**: Lucide React
 - **Build Tool**: Vite
 
@@ -28,10 +30,10 @@ This repository contains a focused trading bot built with React, TypeScript, and
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/bollinger-bands-bot.git
+git clone https://github.com/yourusername/universal-bollinger-bands-bot.git
 
 # Navigate to project directory
-cd bollinger-bands-bot
+cd universal-bollinger-bands-bot
 
 # Install dependencies
 npm install
@@ -77,27 +79,56 @@ The bot provides comprehensive performance metrics:
 
 ## 🔍 Optimization
 
-The optimization engine tests thousands of parameter combinations to find the best settings:
+### Single Timeframe Optimization
+Tests thousands of parameter combinations to find the best settings:
 - SMA periods (2-50)
 - Standard deviations (1.0-3.0)
 - Offsets (0-20)
 - Leverage values (2-125x)
 
-Results are scored based on:
-- Total return (35%)
-- Win rate (15%)
-- Sharpe ratio (20%)
-- Drawdown (15%)
-- Trade frequency (10%)
-- Leverage risk (5%)
+### Multi-Timeframe Optimization
+- Tests the same parameter combinations across multiple datasets/timeframes
+- Finds which timeframe works best for your asset
+- Identifies parameters that work well across different timeframes
+- Provides a ranked summary of results for all timeframes
 
-## 📄 CSV Data Format
+## 📄 CSV Data Format Support
 
-The application accepts CSV files with the following columns:
-- `timestamp` or `date` (Unix timestamp or date string)
-- `close` or `price` (required)
-- `open`, `high`, `low` (optional)
+The application accepts CSV files with flexible formats:
+
+### Candle Data
+- `timestamp` or `date`/`time` (Unix timestamp or date string)
+- `open`, `high`, `low`, `close` (OHLC prices)
 - `volume` (optional)
+
+### Tick Data
+- `timestamp` or `date`/`time` (Unix timestamp or date string)
+- `price` or `last` (last traded price)
+- `bid` and `ask` (optional for bid/ask spread)
+- `volume` (optional)
+
+### Asset Information
+- `symbol` or `ticker` or `pair` (asset identifier)
+- `exchange` (optional trading venue)
+
+## 🌐 Asset Class Support
+
+The bot is designed to work with any asset class:
+
+- **Cryptocurrencies**: BTC, ETH, etc. with any quote currency
+- **Stocks**: Any exchange-traded equity
+- **Forex**: Currency pairs like EUR/USD, GBP/JPY
+- **Commodities**: Gold, silver, oil, etc.
+- **Other**: Any tradable asset with price data
+
+## 🔄 Timeframe Support
+
+Supports any timeframe from milliseconds to weeks:
+
+- **Ultra-Short**: 1-second, 5-second, 15-second, 30-second
+- **Short**: 1-minute, 5-minute, 15-minute, 30-minute
+- **Medium**: 1-hour, 4-hour
+- **Long**: Daily, Weekly
 
 ## ⚠️ Disclaimer
 
