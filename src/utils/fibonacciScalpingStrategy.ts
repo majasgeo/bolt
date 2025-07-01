@@ -34,8 +34,6 @@ export interface SwingPoint {
   price: number;
   type: 'high' | 'low';
   timestamp: number;
-  createdAt?: number; // For tracking when this point was created
-  source?: string; // For tracking where this point was created
 }
 
 export interface FibonacciLevel {
@@ -59,36 +57,24 @@ export class FibonacciScalpingBot {
   private swingPoints: SwingPoint[] = [];
   private currentFibRetracement: FibonacciRetracement | null = null;
   private isSecondsTimeframe: boolean = false;
-  private debugMode: boolean = true; // Enable debug logging
-  private swingPointMutations: {action: string, point: SwingPoint | null, timestamp: number, stack: string}[] = [];
 
   constructor(config: FibonacciScalpingConfig) {
     this.config = config;
     this.capital = config.initialCapital;
-    
-    // Ensure fibRetracementLevels is initialized
-    if (!this.config.fibRetracementLevels) {
-      this.config.fibRetracementLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-    }
-    
-    if (this.debugMode) {
-      console.log("FibonacciScalpingBot initialized with config:", JSON.stringify(this.config));
-    }
   }
 
   backtest(candles: Candle[], bands: BollingerBands[]): BacktestResult {
-    if (this.debugMode) console.log("Starting Fibonacci backtest with config:", JSON.stringify(this.config));
+    console.log("Starting Fibonacci backtest with config:", this.config);
     
     this.trades = [];
     this.capital = this.config.initialCapital;
     this.currentTrade = null;
     this.swingPoints = [];
-    this.swingPointMutations = [];
     this.currentFibRetracement = null;
     
     // Detect if we're working with seconds data
     this.isSecondsTimeframe = this.detectSecondsTimeframe(candles);
-    if (this.debugMode) console.log(`FibonacciScalpingBot detected ${this.isSecondsTimeframe ? 'seconds' : 'minute/hour'} timeframe data`);
+    console.log(`FibonacciScalpingBot detected ${this.isSecondsTimeframe ? 'seconds' : 'minute/hour'} timeframe data`);
 
     // Calculate volume moving average for confirmation
     const volumeMA = this.calculateVolumeMA(candles, 20);
@@ -97,12 +83,12 @@ export class FibonacciScalpingBot {
     this.initializeSwingPoints(candles);
 
     for (let i = this.config.swingLookback; i < candles.length; i++) {
-      const candle = candles[i];
-      const prevCandle = i > 0 ? candles[i-1] : null;
-      
-      if (!candle || !prevCandle) continue;
-      
       try {
+        const candle = candles[i];
+        const prevCandle = i > 0 ? candles[i-1] : null;
+        
+        if (!candle || !prevCandle) continue;
+        
         // Update swing points with proper null checks
         this.updateSwingPoints(candles, i);
         
@@ -117,9 +103,9 @@ export class FibonacciScalpingBot {
 
         // Entry logic with null checks
         if (!this.currentTrade && this.currentFibRetracement) {
-          if (this.config.enableLongPositions && this.isLongEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
+          if (this.config.enableLongPositions && this.isLongEntry(candle, prevCandle, volumeMA[i], i)) {
             this.enterLongPosition(candle, i);
-          } else if (this.config.enableShortPositions && this.isShortEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
+          } else if (this.config.enableShortPositions && this.isShortEntry(candle, prevCandle, volumeMA[i], i)) {
             this.enterShortPosition(candle, i);
           }
         }
@@ -136,7 +122,7 @@ export class FibonacciScalpingBot {
         }
       } catch (error) {
         console.error(`Error processing candle at index ${i}:`, error);
-        // Continue with next candle to prevent complete failure
+        // Continue with next candle instead of breaking the entire backtest
       }
     }
 
@@ -147,18 +133,11 @@ export class FibonacciScalpingBot {
     }
 
     const results = this.calculateResults();
-    if (this.debugMode) {
-      console.log("Fibonacci backtest completed with results:", {
-        totalTrades: results.totalTrades,
-        winRate: results.winRate,
-        totalPnL: results.totalPnL
-      });
-      
-      // Log swing point mutation history if there were errors
-      if (this.swingPointMutations.length > 0) {
-        console.log(`Recorded ${this.swingPointMutations.length} swing point mutations`);
-      }
-    }
+    console.log("Fibonacci backtest completed with results:", {
+      totalTrades: results.totalTrades,
+      winRate: results.winRate,
+      totalPnL: results.totalPnL
+    });
     
     return results;
   }
@@ -180,285 +159,157 @@ export class FibonacciScalpingBot {
 
   // Initialize swing points to prevent null errors
   private initializeSwingPoints(candles: Candle[]) {
-    if (candles.length < this.config.swingLookback * 2) {
-      if (this.debugMode) console.log("Not enough candles to initialize swing points");
-      return;
-    }
+    if (candles.length < this.config.swingLookback * 2) return;
     
     // Add initial high and low points
     const highIndex = Math.min(this.config.swingLookback, candles.length - 1);
     const lowIndex = Math.min(this.config.swingLookback * 2, candles.length - 1);
     
-    if (this.debugMode) console.log(`Initializing swing points at indices ${highIndex} (high) and ${lowIndex} (low)`);
-    
-    const highPoint: SwingPoint = {
+    this.swingPoints.push({
       index: highIndex,
       price: candles[highIndex].high,
       type: 'high',
-      timestamp: candles[highIndex].timestamp,
-      createdAt: Date.now(),
-      source: 'initialization'
-    };
+      timestamp: candles[highIndex].timestamp
+    });
     
-    const lowPoint: SwingPoint = {
+    this.swingPoints.push({
       index: lowIndex,
       price: candles[lowIndex].low,
       type: 'low',
-      timestamp: candles[lowIndex].timestamp,
-      createdAt: Date.now(),
-      source: 'initialization'
-    };
-    
-    // Track mutations
-    this.trackSwingPointMutation('add', highPoint);
-    this.trackSwingPointMutation('add', lowPoint);
-    
-    // Add to array
-    this.swingPoints.push(highPoint);
-    this.swingPoints.push(lowPoint);
-    
-    if (this.debugMode) {
-      console.log("Initialized swing points:", JSON.stringify(this.swingPoints));
-      console.log(`SwingPoints array length after initialization: ${this.swingPoints.length}`);
-      
-      // Verify each point has the required properties
-      this.swingPoints.forEach((point, idx) => {
-        console.log(`SwingPoint[${idx}]:`, 
-          point ? 
-          `index=${point.index}, price=${point.price}, type=${point.type}, timestamp=${point.timestamp}` : 
-          'NULL POINT');
-      });
-    }
-  }
-
-  /**
-   * Track mutations to the swing points array for debugging
-   */
-  private trackSwingPointMutation(action: string, point: SwingPoint | null) {
-    // Get stack trace
-    const stack = new Error().stack || '';
-    
-    this.swingPointMutations.push({
-      action,
-      point,
-      timestamp: Date.now(),
-      stack
+      timestamp: candles[lowIndex].timestamp
     });
     
-    // If we're tracking a null point, log it immediately as this is likely an error
-    if (action !== 'filter' && point === null) {
-      console.error(`⚠️ CRITICAL: Attempted to ${action} a null swing point!`);
-      console.error(`Stack trace: ${stack}`);
-    }
-  }
-
-  /**
-   * Validates if an object is a valid SwingPoint
-   * This is a critical function used throughout the code to prevent null errors
-   */
-  private isValidSwingPoint(point: any): point is SwingPoint {
-    if (!point) return false;
-    if (typeof point !== 'object') return false;
-    
-    // Check required properties exist
-    if (!('index' in point)) return false;
-    if (!('price' in point)) return false;
-    if (!('type' in point)) return false;
-    if (!('timestamp' in point)) return false;
-    
-    // Check property types
-    if (typeof point.index !== 'number') return false;
-    if (typeof point.price !== 'number') return false;
-    if (typeof point.type !== 'string') return false;
-    if (typeof point.timestamp !== 'number') return false;
-    
-    // Check type is valid
-    if (point.type !== 'high' && point.type !== 'low') return false;
-    
-    // Check values are valid
-    if (isNaN(point.index) || isNaN(point.price) || isNaN(point.timestamp)) return false;
-    if (point.price <= 0) return false;
-    
-    return true;
+    console.log("Initialized swing points:", this.swingPoints);
   }
 
   private updateSwingPoints(candles: Candle[], currentIndex: number) {
-    // CRITICAL: Clean up any null or undefined entries from swingPoints array first
-    const originalLength = this.swingPoints.length;
-    const validSwingPoints = this.swingPoints.filter(point => this.isValidSwingPoint(point));
-    
-    // If we lost any points during filtering, log it
-    if (validSwingPoints.length !== originalLength) {
-      if (this.debugMode) {
-        console.log(`⚠️ Removed ${originalLength - validSwingPoints.length} invalid swing points`);
-        console.log(`SwingPoints before: ${originalLength}, after: ${validSwingPoints.length}`);
-      }
-      
-      // Track this mutation
-      this.trackSwingPointMutation('filter', null);
-    }
-    
-    // Update the array with only valid points
-    this.swingPoints = validSwingPoints;
+    try {
+      // Clean up any null or undefined entries from swingPoints array first
+      this.swingPoints = this.swingPoints.filter(point => 
+        point !== null && 
+        point !== undefined && 
+        typeof point === 'object' && 
+        'type' in point && 
+        'price' in point && 
+        'index' in point && 
+        'timestamp' in point
+      );
 
-    if (currentIndex < this.config.swingLookback * 2) {
-      if (this.debugMode) console.log(`Skipping swing point detection at index ${currentIndex} - not enough history`);
-      return;
-    }
+      if (currentIndex < this.config.swingLookback * 2) return;
 
-    const lookback = this.config.swingLookback;
-    const centerIndex = currentIndex - lookback;
-    
-    // Ensure centerIndex is valid
-    if (centerIndex < 0 || centerIndex >= candles.length) {
-      if (this.debugMode) console.log(`Invalid centerIndex ${centerIndex} for swing point detection`);
-      return;
-    }
-    
-    const centerCandle = candles[centerIndex];
-    if (!centerCandle) {
-      if (this.debugMode) console.log(`No candle found at centerIndex ${centerIndex}`);
-      return;
-    }
+      const lookback = this.config.swingLookback;
+      const centerIndex = currentIndex - lookback;
+      
+      // Ensure centerIndex is valid
+      if (centerIndex < 0 || centerIndex >= candles.length) return;
+      
+      const centerCandle = candles[centerIndex];
+      if (!centerCandle) return;
 
-    // Check for swing high with proper bounds checking
-    let isSwingHigh = true;
-    for (let i = centerIndex - lookback; i <= centerIndex + lookback; i++) {
-      if (i === centerIndex || i < 0 || i >= candles.length) continue;
-      if (!candles[i]) continue;
-      
-      if (candles[i].high >= centerCandle.high) {
-        isSwingHigh = false;
-        break;
-      }
-    }
-
-    // Check for swing low with proper bounds checking
-    let isSwingLow = true;
-    for (let i = centerIndex - lookback; i <= centerIndex + lookback; i++) {
-      if (i === centerIndex || i < 0 || i >= candles.length) continue;
-      if (!candles[i]) continue;
-      
-      if (candles[i].low <= centerCandle.low) {
-        isSwingLow = false;
-        break;
-      }
-    }
-
-    if (isSwingHigh) {
-      const newSwingHigh: SwingPoint = {
-        index: centerIndex,
-        price: centerCandle.high,
-        type: 'high',
-        timestamp: centerCandle.timestamp,
-        createdAt: Date.now(),
-        source: 'swing-detection'
-      };
-      
-      // Track this mutation
-      this.trackSwingPointMutation('add', newSwingHigh);
-      
-      // Add to array
-      this.swingPoints.push(newSwingHigh);
-      
-      if (this.debugMode) console.log(`Added new swing high at index ${centerIndex}, price ${centerCandle.high}`);
-    }
-
-    if (isSwingLow) {
-      const newSwingLow: SwingPoint = {
-        index: centerIndex,
-        price: centerCandle.low,
-        type: 'low',
-        timestamp: centerCandle.timestamp,
-        createdAt: Date.now(),
-        source: 'swing-detection'
-      };
-      
-      // Track this mutation
-      this.trackSwingPointMutation('add', newSwingLow);
-      
-      // Add to array
-      this.swingPoints.push(newSwingLow);
-      
-      if (this.debugMode) console.log(`Added new swing low at index ${centerIndex}, price ${centerCandle.low}`);
-    }
-
-    // Keep only recent swing points and filter out any invalid entries again
-    const beforePruneLength = this.swingPoints.length;
-    this.swingPoints = this.swingPoints.filter(point => 
-      this.isValidSwingPoint(point) &&
-      currentIndex - point.index <= this.config.swingLookback * 10
-    );
-    
-    // Track pruning
-    if (beforePruneLength !== this.swingPoints.length) {
-      this.trackSwingPointMutation('prune', null);
-    }
-    
-    if (this.debugMode && (isSwingHigh || isSwingLow)) {
-      console.log(`After update, swingPoints count: ${this.swingPoints.length}`);
-      
-      // Verify the array is clean
-      const invalidPoints = this.swingPoints.filter(point => !this.isValidSwingPoint(point));
-      if (invalidPoints.length > 0) {
-        console.error(`⚠️ CRITICAL: Still have ${invalidPoints.length} invalid points after filtering!`);
-        console.log("Invalid points:", invalidPoints);
+      // Check for swing high with proper bounds checking
+      let isSwingHigh = true;
+      for (let i = centerIndex - lookback; i <= centerIndex + lookback; i++) {
+        if (i === centerIndex || i < 0 || i >= candles.length) continue;
+        if (!candles[i]) continue;
         
-        // Force clean the array again
-        this.swingPoints = this.swingPoints.filter(point => this.isValidSwingPoint(point));
-        this.trackSwingPointMutation('emergency-filter', null);
+        if (candles[i].high >= centerCandle.high) {
+          isSwingHigh = false;
+          break;
+        }
+      }
+
+      // Check for swing low with proper bounds checking
+      let isSwingLow = true;
+      for (let i = centerIndex - lookback; i <= centerIndex + lookback; i++) {
+        if (i === centerIndex || i < 0 || i >= candles.length) continue;
+        if (!candles[i]) continue;
+        
+        if (candles[i].low <= centerCandle.low) {
+          isSwingLow = false;
+          break;
+        }
+      }
+
+      if (isSwingHigh) {
+        this.swingPoints.push({
+          index: centerIndex,
+          price: centerCandle.high,
+          type: 'high',
+          timestamp: centerCandle.timestamp
+        });
+      }
+
+      if (isSwingLow) {
+        this.swingPoints.push({
+          index: centerIndex,
+          price: centerCandle.low,
+          type: 'low',
+          timestamp: centerCandle.timestamp
+        });
+      }
+
+      // Keep only recent swing points and filter out any null entries again
+      this.swingPoints = this.swingPoints.filter(point => 
+        point && 
+        point !== null && 
+        point !== undefined && 
+        currentIndex - point.index <= this.config.swingLookback * 10
+      );
+    } catch (error) {
+      console.error("Error in updateSwingPoints:", error);
+      // Ensure we always have a valid swingPoints array
+      if (!Array.isArray(this.swingPoints)) {
+        this.swingPoints = [];
       }
     }
   }
 
   private checkStructureBreak(candles: Candle[], currentIndex: number) {
     try {
-      // CRITICAL: Clean swing points array before processing
-      const originalLength = this.swingPoints.length;
-      this.swingPoints = this.swingPoints.filter(point => this.isValidSwingPoint(point));
-      
-      if (originalLength !== this.swingPoints.length) {
-        this.trackSwingPointMutation('structure-break-filter', null);
-      }
+      // Clean swing points array before processing
+      this.swingPoints = this.swingPoints.filter(point => 
+        point !== null && 
+        point !== undefined && 
+        typeof point === 'object' && 
+        'type' in point && 
+        'price' in point && 
+        'index' in point && 
+        'timestamp' in point
+      );
 
-      if (this.swingPoints.length < 2) {
-        if (this.debugMode) console.log("Not enough swing points for structure break check");
-        return;
-      }
+      if (this.swingPoints.length < 2) return;
 
       const currentCandle = candles[currentIndex];
-      if (!currentCandle) {
-        if (this.debugMode) console.log(`No candle found at index ${currentIndex}`);
-        return;
-      }
+      if (!currentCandle) return;
       
-      // Get recent swing highs and lows, ensuring they're valid
+      // Enhanced type guard for swing points filtering with explicit null checks
+      const isValidSwingPoint = (p: SwingPoint | null | undefined): p is SwingPoint => {
+        return p !== null && p !== undefined && 
+              typeof p === 'object' && 
+              'type' in p && 
+              'price' in p && 
+              'index' in p && 
+              'timestamp' in p &&
+              (p.type === 'high' || p.type === 'low');
+      };
+
+      // Fix: Add explicit null check before accessing 'type' property
       const recentSwingHighs = this.swingPoints
-        .filter(p => this.isValidSwingPoint(p) && p.type === 'high')
+        .filter(isValidSwingPoint)
+        .filter(p => p && p.type === 'high')
         .slice(-3);
         
       const recentSwingLows = this.swingPoints
-        .filter(p => this.isValidSwingPoint(p) && p.type === 'low')
+        .filter(isValidSwingPoint)
+        .filter(p => p && p.type === 'low')
         .slice(-3);
-
-      if (this.debugMode) {
-        console.log(`Structure break check: ${recentSwingHighs.length} recent highs, ${recentSwingLows.length} recent lows`);
-      }
 
       // Check for uptrend structure break (break of last swing high)
       if (recentSwingHighs.length >= 1 && recentSwingLows.length >= 1) {
         const lastSwingHigh = recentSwingHighs[recentSwingHighs.length - 1];
         const lastSwingLow = recentSwingLows[recentSwingLows.length - 1];
         
-        // Double-check these points are valid
-        if (!this.isValidSwingPoint(lastSwingHigh) || !this.isValidSwingPoint(lastSwingLow)) {
-          if (this.debugMode) {
-            console.error("Invalid swing points detected during structure break check");
-            console.log("lastSwingHigh:", lastSwingHigh);
-            console.log("lastSwingLow:", lastSwingLow);
-          }
-          return;
-        }
+        if (!lastSwingHigh || !lastSwingLow) return;
 
         // Structure break to upside
         if (currentCandle.close > lastSwingHigh.price && 
@@ -468,8 +319,6 @@ export class FibonacciScalpingBot {
           this.currentFibRetracement = this.calculateFibonacciRetracement(
             lastSwingLow, lastSwingHigh, 'uptrend'
           );
-          
-          if (this.debugMode) console.log(`Uptrend structure break detected at index ${currentIndex}`);
         }
 
         // Structure break to downside
@@ -480,14 +329,10 @@ export class FibonacciScalpingBot {
           this.currentFibRetracement = this.calculateFibonacciRetracement(
             lastSwingHigh, lastSwingLow, 'downtrend'
           );
-          
-          if (this.debugMode) console.log(`Downtrend structure break detected at index ${currentIndex}`);
         }
       }
     } catch (error) {
       console.error("Error in checkStructureBreak:", error);
-      // Recover by clearing the current Fibonacci retracement
-      this.currentFibRetracement = null;
     }
   }
 
@@ -501,76 +346,35 @@ export class FibonacciScalpingBot {
     point2: SwingPoint, 
     direction: 'uptrend' | 'downtrend'
   ): FibonacciRetracement {
-    if (this.debugMode) console.log(`Calculating Fibonacci levels for ${direction}`);
-    
-    // Verify points are valid
-    if (!this.isValidSwingPoint(point1) || !this.isValidSwingPoint(point2)) {
-      if (this.debugMode) {
-        console.error("Invalid swing points passed to calculateFibonacciRetracement");
-        console.log("point1:", point1);
-        console.log("point2:", point2);
-      }
-      
-      // Create safe default points if needed
-      if (!this.isValidSwingPoint(point1)) {
-        point1 = {
-          index: 0,
-          price: 100,
-          type: 'low',
-          timestamp: Date.now(),
-          createdAt: Date.now(),
-          source: 'fallback-creation'
-        };
-        this.trackSwingPointMutation('fallback-create', point1);
-      }
-      
-      if (!this.isValidSwingPoint(point2)) {
-        point2 = {
-          index: 1,
-          price: 110,
-          type: 'high',
-          timestamp: Date.now() + 60000,
-          createdAt: Date.now(),
-          source: 'fallback-creation'
-        };
-        this.trackSwingPointMutation('fallback-create', point2);
-      }
-    }
-    
-    const high = direction === 'uptrend' ? point2 : point1;
-    const low = direction === 'uptrend' ? point1 : point2;
-    const range = high.price - low.price;
+    try {
+      const high = direction === 'uptrend' ? point2 : point1;
+      const low = direction === 'uptrend' ? point1 : point2;
+      const range = high.price - low.price;
 
-    if (range <= 0) {
-      if (this.debugMode) console.log(`Invalid range: ${range} for Fibonacci calculation`);
-      // Return a default retracement with the same points but safe levels
-      const safeRange = Math.abs(high.price - low.price) || high.price * 0.01; // Use 1% if range is 0
-      
       const levels: FibonacciLevel[] = this.config.fibRetracementLevels.map(level => ({
         level,
         price: direction === 'uptrend' 
-          ? high.price - (safeRange * level)
-          : low.price + (safeRange * level),
+          ? high.price - (range * level)
+          : low.price + (range * level),
         name: this.getFibonacciLevelName(level)
       }));
-      
-      return { swingHigh: high, swingLow: low, levels, direction };
+
+      return {
+        swingHigh: high,
+        swingLow: low,
+        levels,
+        direction
+      };
+    } catch (error) {
+      console.error("Error in calculateFibonacciRetracement:", error);
+      // Return a default retracement to prevent null errors
+      return {
+        swingHigh: point1.type === 'high' ? point1 : point2,
+        swingLow: point1.type === 'low' ? point1 : point2,
+        levels: [],
+        direction
+      };
     }
-
-    const levels: FibonacciLevel[] = this.config.fibRetracementLevels.map(level => ({
-      level,
-      price: direction === 'uptrend' 
-        ? high.price - (range * level)
-        : low.price + (range * level),
-      name: this.getFibonacciLevelName(level)
-    }));
-
-    return {
-      swingHigh: high,
-      swingLow: low,
-      levels,
-      direction
-    };
   }
 
   private getFibonacciLevelName(level: number): string {
@@ -587,148 +391,103 @@ export class FibonacciScalpingBot {
   }
 
   private isLongEntry(candle: Candle, prevCandle: Candle, volumeMA: number, index: number): boolean {
-    if (!this.currentFibRetracement) {
-      if (this.debugMode) console.log(`No Fibonacci retracement available for long entry check at index ${index}`);
-      return false;
-    }
-    
-    if (this.currentFibRetracement.direction !== 'uptrend') {
-      if (this.debugMode) console.log(`Current Fibonacci retracement is not uptrend at index ${index}`);
-      return false;
-    }
+    try {
+      if (!this.currentFibRetracement || this.currentFibRetracement.direction !== 'uptrend') {
+        return false;
+      }
 
-    // Check if price is in golden zone with proper null checks
-    const goldenZoneLow = this.currentFibRetracement.levels.find(l => 
-      l && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
-    );
-    
-    const goldenZoneHigh = this.currentFibRetracement.levels.find(l => 
-      l && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
-    );
-    
-    if (!goldenZoneLow || !goldenZoneHigh) {
-      if (this.debugMode) console.log("Golden zone levels not found in Fibonacci levels");
-      return false;
-    }
-
-    const inGoldenZone = candle.close >= goldenZoneLow.price && candle.close <= goldenZoneHigh.price;
-    if (!inGoldenZone) {
-      if (this.debugMode) console.log(`Price ${candle.close} not in golden zone (${goldenZoneLow.price}-${goldenZoneHigh.price})`);
-      return false;
-    }
-
-    const conditions = [
-      // Price bounced from golden zone
-      prevCandle.close <= goldenZoneLow.price && candle.close > goldenZoneLow.price,
+      // Check if price is in golden zone with proper null checks
+      const goldenZoneLow = this.currentFibRetracement.levels.find(l => 
+        l && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
+      );
       
-      // Volume confirmation
-      !this.config.requireVolumeConfirmation || (volumeMA > 0 && candle.volume > volumeMA * this.config.volumeThreshold),
+      const goldenZoneHigh = this.currentFibRetracement.levels.find(l => 
+        l && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
+      );
       
-      // Candle color confirmation
-      !this.config.requireCandleColorConfirmation || candle.close > candle.open,
-      
-      // Price action confirmation (candle closed above golden zone low)
-      candle.close > goldenZoneLow.price
-    ];
+      if (!goldenZoneLow || !goldenZoneHigh) return false;
 
-    const confirmedConditions = conditions.filter(Boolean).length;
-    const result = confirmedConditions >= 3; // Require at least 3 confirmations
-    
-    if (this.debugMode && result) {
-      console.log(`Long entry signal at index ${index}: ${confirmedConditions} conditions met`);
+      const inGoldenZone = candle.close >= goldenZoneLow.price && candle.close <= goldenZoneHigh.price;
+      if (!inGoldenZone) return false;
+
+      const conditions = [
+        // Price bounced from golden zone
+        prevCandle.close <= goldenZoneLow.price && candle.close > goldenZoneLow.price,
+        
+        // Volume confirmation
+        !this.config.requireVolumeConfirmation || (volumeMA > 0 && candle.volume > volumeMA * this.config.volumeThreshold),
+        
+        // Candle color confirmation
+        !this.config.requireCandleColorConfirmation || candle.close > candle.open,
+        
+        // Price action confirmation (candle closed above golden zone low)
+        candle.close > goldenZoneLow.price
+      ];
+
+      return conditions.filter(Boolean).length >= 3; // Require at least 3 confirmations
+    } catch (error) {
+      console.error("Error in isLongEntry:", error);
+      return false;
     }
-    
-    return result;
   }
 
   private isShortEntry(candle: Candle, prevCandle: Candle, volumeMA: number, index: number): boolean {
-    if (!this.currentFibRetracement) {
-      if (this.debugMode) console.log(`No Fibonacci retracement available for short entry check at index ${index}`);
-      return false;
-    }
-    
-    if (this.currentFibRetracement.direction !== 'downtrend') {
-      if (this.debugMode) console.log(`Current Fibonacci retracement is not downtrend at index ${index}`);
-      return false;
-    }
+    try {
+      if (!this.currentFibRetracement || this.currentFibRetracement.direction !== 'downtrend') {
+        return false;
+      }
 
-    // Check if price is in golden zone with proper null checks
-    const goldenZoneLow = this.currentFibRetracement.levels.find(l => 
-      l && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
-    );
-    
-    const goldenZoneHigh = this.currentFibRetracement.levels.find(l => 
-      l && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
-    );
-    
-    if (!goldenZoneLow || !goldenZoneHigh) {
-      if (this.debugMode) console.log("Golden zone levels not found in Fibonacci levels");
-      return false;
-    }
-
-    const inGoldenZone = candle.close >= goldenZoneLow.price && candle.close <= goldenZoneHigh.price;
-    if (!inGoldenZone) {
-      if (this.debugMode) console.log(`Price ${candle.close} not in golden zone (${goldenZoneLow.price}-${goldenZoneHigh.price})`);
-      return false;
-    }
-
-    const conditions = [
-      // Price rejected from golden zone
-      prevCandle.close >= goldenZoneHigh.price && candle.close < goldenZoneHigh.price,
+      // Check if price is in golden zone with proper null checks
+      const goldenZoneLow = this.currentFibRetracement.levels.find(l => 
+        l && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
+      );
       
-      // Volume confirmation
-      !this.config.requireVolumeConfirmation || (volumeMA > 0 && candle.volume > volumeMA * this.config.volumeThreshold),
+      const goldenZoneHigh = this.currentFibRetracement.levels.find(l => 
+        l && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
+      );
       
-      // Candle color confirmation
-      !this.config.requireCandleColorConfirmation || candle.close < candle.open,
-      
-      // Price action confirmation (candle closed below golden zone high)
-      candle.close < goldenZoneHigh.price
-    ];
+      if (!goldenZoneLow || !goldenZoneHigh) return false;
 
-    const confirmedConditions = conditions.filter(Boolean).length;
-    const result = confirmedConditions >= 3; // Require at least 3 confirmations
-    
-    if (this.debugMode && result) {
-      console.log(`Short entry signal at index ${index}: ${confirmedConditions} conditions met`);
+      const inGoldenZone = candle.close >= goldenZoneLow.price && candle.close <= goldenZoneHigh.price;
+      if (!inGoldenZone) return false;
+
+      const conditions = [
+        // Price rejected from golden zone
+        prevCandle.close >= goldenZoneHigh.price && candle.close < goldenZoneHigh.price,
+        
+        // Volume confirmation
+        !this.config.requireVolumeConfirmation || (volumeMA > 0 && candle.volume > volumeMA * this.config.volumeThreshold),
+        
+        // Candle color confirmation
+        !this.config.requireCandleColorConfirmation || candle.close < candle.open,
+        
+        // Price action confirmation (candle closed below golden zone high)
+        candle.close < goldenZoneHigh.price
+      ];
+
+      return conditions.filter(Boolean).length >= 3; // Require at least 3 confirmations
+    } catch (error) {
+      console.error("Error in isShortEntry:", error);
+      return false;
     }
-    
-    return result;
   }
 
   private shouldExitOnFibonacci(candle: Candle): boolean {
-    if (!this.currentTrade || !this.currentFibRetracement) return false;
+    try {
+      if (!this.currentTrade || !this.currentFibRetracement) return false;
 
-    // Verify Fibonacci levels exist
-    if (!this.currentFibRetracement.levels || !Array.isArray(this.currentFibRetracement.levels)) {
-      if (this.debugMode) console.log("Invalid Fibonacci levels for exit check");
+      if (this.currentTrade.position === 'long') {
+        // Exit when price reaches previous swing high or 100% Fibonacci level
+        const targetLevel = this.currentFibRetracement.levels.find(l => l && Math.abs(l.level - 0) < 0.001); // 0% = swing high
+        return targetLevel ? candle.high >= targetLevel.price : false;
+      } else {
+        // Exit when price reaches previous swing low or 100% Fibonacci level
+        const targetLevel = this.currentFibRetracement.levels.find(l => l && Math.abs(l.level - 0) < 0.001); // 0% = swing low
+        return targetLevel ? candle.low <= targetLevel.price : false;
+      }
+    } catch (error) {
+      console.error("Error in shouldExitOnFibonacci:", error);
       return false;
-    }
-
-    if (this.currentTrade.position === 'long') {
-      // Exit when price reaches previous swing high or 100% Fibonacci level
-      const targetLevel = this.currentFibRetracement.levels.find(l => 
-        l && typeof l.level === 'number' && Math.abs(l.level - 0) < 0.001
-      ); // 0% = swing high
-      
-      if (!targetLevel) {
-        if (this.debugMode) console.log("0% Fibonacci level not found for long exit");
-        return false;
-      }
-      
-      return candle.high >= targetLevel.price;
-    } else {
-      // Exit when price reaches previous swing low or 100% Fibonacci level
-      const targetLevel = this.currentFibRetracement.levels.find(l => 
-        l && typeof l.level === 'number' && Math.abs(l.level - 0) < 0.001
-      ); // 0% = swing low
-      
-      if (!targetLevel) {
-        if (this.debugMode) console.log("0% Fibonacci level not found for short exit");
-        return false;
-      }
-      
-      return candle.low <= targetLevel.price;
     }
   }
 
@@ -791,8 +550,6 @@ export class FibonacciScalpingBot {
       leverage: this.config.maxLeverage,
       isOpen: true
     };
-    
-    if (this.debugMode) console.log(`Entered LONG position at index ${index}, price ${candle.close}, stop ${stopLoss}`);
   }
 
   private enterShortPosition(candle: Candle, index: number) {
@@ -807,8 +564,6 @@ export class FibonacciScalpingBot {
       leverage: this.config.maxLeverage,
       isOpen: true
     };
-    
-    if (this.debugMode) console.log(`Entered SHORT position at index ${index}, price ${candle.close}, stop ${stopLoss}`);
   }
 
   private exitPosition(candle: Candle, index: number, reason: 'stop-loss' | 'target' | 'strategy-exit' | 'timeout') {
@@ -842,11 +597,6 @@ export class FibonacciScalpingBot {
 
     this.capital += pnl;
     this.trades.push({ ...this.currentTrade });
-    
-    if (this.debugMode) {
-      console.log(`Exited ${this.currentTrade.position} position at index ${index}, price ${exitPrice}, reason: ${reason}, PnL: ${pnl}`);
-    }
-    
     this.currentTrade = null;
   }
 
@@ -926,18 +676,6 @@ export class FibonacciScalpingBot {
       lastTradeTime,
       tradingPeriodDays,
       averageTradesPerDay
-    };
-  }
-  
-  // For debugging - get a snapshot of the current state
-  public getDebugSnapshot(): any {
-    return {
-      swingPoints: this.swingPoints.map(p => ({...p})),
-      swingPointCount: this.swingPoints.length,
-      validSwingPointCount: this.swingPoints.filter(p => this.isValidSwingPoint(p)).length,
-      currentFibRetracement: this.currentFibRetracement ? {...this.currentFibRetracement} : null,
-      swingPointMutations: this.swingPointMutations.slice(-10), // Last 10 mutations
-      trades: this.trades.length
     };
   }
 }
