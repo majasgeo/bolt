@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { MultiTimeframeOptimizationResult } from '../utils/multiTimeframeOptimizer';
-import { Trophy, TrendingUp, Target, BarChart3, ChevronDown, ChevronUp, Calendar, Clock, Zap, Filter, DollarSign } from 'lucide-react';
+import { Trophy, TrendingUp, Target, BarChart3, ChevronDown, ChevronUp, Calendar, Clock, Zap, Filter, DollarSign, Database } from 'lucide-react';
 
 interface MultiTimeframeResultsProps {
   results: MultiTimeframeOptimizationResult[];
