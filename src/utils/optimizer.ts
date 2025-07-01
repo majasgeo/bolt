@@ -78,13 +78,8 @@ export class StrategyOptimizer {
       console.log(`⚠️ Large dataset detected (${this.candles.length.toLocaleString()} candles). Using optimized processing.`);
     }
 
-    // Process in batches to prevent UI freezing
-    const batchSize = isLargeDataset ? 10 : 50;
-    let batch = 0;
-    let batchTests = 0;
-    let allTests = [];
-
     // Create all test configurations first
+    const allTests = [];
     for (const period of smaRange) {
       for (const stdDev of stdDevValues) {
         for (const offset of offsetValues) {
@@ -97,7 +92,10 @@ export class StrategyOptimizer {
 
     console.log(`📊 Created ${allTests.length.toLocaleString()} test configurations`);
 
-    // Process tests in batches
+    // Process in batches to prevent UI freezing
+    const batchSize = isLargeDataset ? 10 : 50;
+    let batch = 0;
+    
     while (batch * batchSize < allTests.length) {
       const startIdx = batch * batchSize;
       const endIdx = Math.min((batch + 1) * batchSize, allTests.length);
@@ -235,7 +233,7 @@ export class StrategyOptimizer {
       console.log(`   Parameters: SMA ${best.period}, StdDev ${best.stdDev}, Offset ${best.offset}, Leverage ${best.leverage}x`);
       console.log(`   Win Rate: ${(best.winRate * 100).toFixed(1)}%, Trades: ${best.totalTrades}, Max Drawdown: ${(best.maxDrawdown * 100).toFixed(1)}%`);
       if (best.tradingPeriodDays) {
-        console.log(`   Trading Period: ${this.formatDuration(best.tradingPeriodDays)}, Trades/Day: ${best.averageTradesPerDay?.toFixed(2) || 'N/A'}`);
+        console.log(`   Trading period: ${this.formatDuration(best.tradingPeriodDays)}, Trades/Day: ${best.averageTradesPerDay?.toFixed(2) || 'N/A'}`);
       }
       
       // CRITICAL: Test the best configuration manually to verify it matches
