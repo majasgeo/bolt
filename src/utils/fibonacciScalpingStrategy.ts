@@ -102,36 +102,41 @@ export class FibonacciScalpingBot {
       
       if (!candle || !prevCandle) continue;
       
-      // Update swing points with proper null checks
-      this.updateSwingPoints(candles, i);
-      
-      // Check for structure breaks and update Fibonacci retracement
-      this.checkStructureBreak(candles, i);
-      
-      // Check for position timeout (scalping - quick exits)
-      if (this.currentTrade && this.shouldClosePosition(candle, i, candles)) {
-        this.exitPosition(candle, i, 'timeout');
-        continue;
-      }
-
-      // Entry logic with null checks
-      if (!this.currentTrade && this.currentFibRetracement) {
-        if (this.config.enableLongPositions && this.isLongEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
-          this.enterLongPosition(candle, i);
-        } else if (this.config.enableShortPositions && this.isShortEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
-          this.enterShortPosition(candle, i);
+      try {
+        // Update swing points with proper null checks
+        this.updateSwingPoints(candles, i);
+        
+        // Check for structure breaks and update Fibonacci retracement
+        this.checkStructureBreak(candles, i);
+        
+        // Check for position timeout (scalping - quick exits)
+        if (this.currentTrade && this.shouldClosePosition(candle, i, candles)) {
+          this.exitPosition(candle, i, 'timeout');
+          continue;
         }
-      }
 
-      // Exit logic
-      if (this.currentTrade) {
-        if (this.shouldStopLoss(candle)) {
-          this.exitPosition(candle, i, 'stop-loss');
-        } else if (this.shouldTakeProfit(candle)) {
-          this.exitPosition(candle, i, 'target');
-        } else if (this.shouldExitOnFibonacci(candle)) {
-          this.exitPosition(candle, i, 'strategy-exit');
+        // Entry logic with null checks
+        if (!this.currentTrade && this.currentFibRetracement) {
+          if (this.config.enableLongPositions && this.isLongEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
+            this.enterLongPosition(candle, i);
+          } else if (this.config.enableShortPositions && this.isShortEntry(candle, prevCandle, volumeMA[i] || 0, i)) {
+            this.enterShortPosition(candle, i);
+          }
         }
+
+        // Exit logic
+        if (this.currentTrade) {
+          if (this.shouldStopLoss(candle)) {
+            this.exitPosition(candle, i, 'stop-loss');
+          } else if (this.shouldTakeProfit(candle)) {
+            this.exitPosition(candle, i, 'target');
+          } else if (this.shouldExitOnFibonacci(candle)) {
+            this.exitPosition(candle, i, 'strategy-exit');
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing candle at index ${i}:`, error);
+        // Continue with next candle to prevent complete failure
       }
     }
 
@@ -407,26 +412,26 @@ export class FibonacciScalpingBot {
   }
 
   private checkStructureBreak(candles: Candle[], currentIndex: number) {
-    // CRITICAL: Clean swing points array before processing
-    const originalLength = this.swingPoints.length;
-    this.swingPoints = this.swingPoints.filter(point => this.isValidSwingPoint(point));
-    
-    if (originalLength !== this.swingPoints.length) {
-      this.trackSwingPointMutation('structure-break-filter', null);
-    }
-
-    if (this.swingPoints.length < 2) {
-      if (this.debugMode) console.log("Not enough swing points for structure break check");
-      return;
-    }
-
-    const currentCandle = candles[currentIndex];
-    if (!currentCandle) {
-      if (this.debugMode) console.log(`No candle found at index ${currentIndex}`);
-      return;
-    }
-    
     try {
+      // CRITICAL: Clean swing points array before processing
+      const originalLength = this.swingPoints.length;
+      this.swingPoints = this.swingPoints.filter(point => this.isValidSwingPoint(point));
+      
+      if (originalLength !== this.swingPoints.length) {
+        this.trackSwingPointMutation('structure-break-filter', null);
+      }
+
+      if (this.swingPoints.length < 2) {
+        if (this.debugMode) console.log("Not enough swing points for structure break check");
+        return;
+      }
+
+      const currentCandle = candles[currentIndex];
+      if (!currentCandle) {
+        if (this.debugMode) console.log(`No candle found at index ${currentIndex}`);
+        return;
+      }
+      
       // Get recent swing highs and lows, ensuring they're valid
       const recentSwingHighs = this.swingPoints
         .filter(p => this.isValidSwingPoint(p) && p.type === 'high')

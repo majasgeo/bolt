@@ -113,48 +113,53 @@ export class BollingerFibonacciHybridBot {
     const volumeMA = this.calculateVolumeMA(candles, 20);
 
     for (let i = this.config.swingLookback + 1; i < candles.length; i++) {
-      const candle = candles[i];
-      const prevCandle = candles[i - 1];
-      const band = bands[i];
-      const prevBand = bands[i - 1];
+      try {
+        const candle = candles[i];
+        const prevCandle = candles[i - 1];
+        const band = bands[i];
+        const prevBand = bands[i - 1];
 
-      if (!band || !prevBand) continue;
+        if (!band || !prevBand) continue;
 
-      // Update swing points for Fibonacci analysis with proper null checks
-      this.updateSwingPoints(candles, i);
-      
-      // Update Fibonacci levels when new swing points are found
-      this.updateFibonacciLevels();
+        // Update swing points for Fibonacci analysis with proper null checks
+        this.updateSwingPoints(candles, i);
+        
+        // Update Fibonacci levels when new swing points are found
+        this.updateFibonacciLevels();
 
-      // Check for position timeout (1-minute scalping should be quick)
-      if (this.currentTrade && this.shouldClosePosition(candle, i, candles)) {
-        this.exitPosition(candle, i, 'timeout');
-        continue;
-      }
-
-      // Generate hybrid signals with proper null checks
-      const signal = this.generateHybridSignal(
-        candle, prevCandle, band, prevBand, volumeMA[i] || 0, i, candles
-      );
-
-      // Entry logic based on hybrid signals
-      if (!this.currentTrade && signal) {
-        if (this.config.enableLongPositions && signal.type === 'long' && signal.strength >= 70) {
-          this.enterLongPosition(candle, i, signal);
-        } else if (this.config.enableShortPositions && signal.type === 'short' && signal.strength >= 70) {
-          this.enterShortPosition(candle, i, signal);
+        // Check for position timeout (1-minute scalping should be quick)
+        if (this.currentTrade && this.shouldClosePosition(candle, i, candles)) {
+          this.exitPosition(candle, i, 'timeout');
+          continue;
         }
-      }
 
-      // Exit logic
-      if (this.currentTrade) {
-        if (this.shouldStopLoss(candle)) {
-          this.exitPosition(candle, i, 'stop-loss');
-        } else if (this.shouldTakeProfit(candle)) {
-          this.exitPosition(candle, i, 'target');
-        } else if (this.shouldExitOnSignalReversal(candle, band)) {
-          this.exitPosition(candle, i, 'strategy-exit');
+        // Generate hybrid signals with proper null checks
+        const signal = this.generateHybridSignal(
+          candle, prevCandle, band, prevBand, volumeMA[i] || 0, i, candles
+        );
+
+        // Entry logic based on hybrid signals
+        if (!this.currentTrade && signal) {
+          if (this.config.enableLongPositions && signal.type === 'long' && signal.strength >= 70) {
+            this.enterLongPosition(candle, i, signal);
+          } else if (this.config.enableShortPositions && signal.type === 'short' && signal.strength >= 70) {
+            this.enterShortPosition(candle, i, signal);
+          }
         }
+
+        // Exit logic
+        if (this.currentTrade) {
+          if (this.shouldStopLoss(candle)) {
+            this.exitPosition(candle, i, 'stop-loss');
+          } else if (this.shouldTakeProfit(candle)) {
+            this.exitPosition(candle, i, 'target');
+          } else if (this.shouldExitOnSignalReversal(candle, band)) {
+            this.exitPosition(candle, i, 'strategy-exit');
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing candle at index ${i}:`, error);
+        // Continue with next candle to prevent complete failure
       }
     }
 
