@@ -87,6 +87,19 @@ export class BollingerFibonacciHybridBot {
     try {
       console.log("Starting hybrid backtest with config:", this.config);
       
+      // Validate input data
+      if (!candles || !Array.isArray(candles) || candles.length === 0) {
+        throw new Error("Invalid candles data provided");
+      }
+      
+      if (!bands || !Array.isArray(bands) || bands.length === 0) {
+        throw new Error("Invalid bands data provided");
+      }
+      
+      if (candles.length !== bands.length) {
+        throw new Error("Candles and bands arrays must have the same length");
+      }
+      
       this.trades = [];
       this.capital = this.config.initialCapital;
       this.currentTrade = null;
@@ -111,7 +124,25 @@ export class BollingerFibonacciHybridBot {
           const band = bands[i];
           const prevBand = bands[i - 1];
 
-          if (!band || !prevBand) continue;
+          // Validate current data points
+          if (!candle || !prevCandle || !band || !prevBand) {
+            console.warn(`Skipping index ${i}: missing data`);
+            continue;
+          }
+          
+          // Validate candle data
+          if (typeof candle.close !== 'number' || isNaN(candle.close) || candle.close <= 0) {
+            console.warn(`Skipping index ${i}: invalid candle data`);
+            continue;
+          }
+          
+          // Validate band data
+          if (typeof band.upper !== 'number' || typeof band.lower !== 'number' || typeof band.middle !== 'number' ||
+              isNaN(band.upper) || isNaN(band.lower) || isNaN(band.middle) ||
+              band.upper <= 0 || band.lower <= 0 || band.middle <= 0) {
+            console.warn(`Skipping index ${i}: invalid band data`);
+            continue;
+          }
 
           // Update swing points for Fibonacci analysis with proper null checks
           this.updateSwingPoints(candles, i);
@@ -129,6 +160,11 @@ export class BollingerFibonacciHybridBot {
           const signal = this.generateHybridSignal(
             candle, prevCandle, band, prevBand, volumeMA[i], i, candles
           );
+          
+          if (signal && (typeof signal.strength !== 'number' || isNaN(signal.strength))) {
+            console.warn(`Invalid signal strength at index ${i}`);
+            continue;
+          }
 
           // Entry logic based on hybrid signals
           if (!this.currentTrade && signal) {
@@ -150,7 +186,7 @@ export class BollingerFibonacciHybridBot {
             }
           }
         } catch (error) {
-          console.error(`Error processing candle at index ${i}:`, error);
+          console.error(`Error processing candle at index ${i}:`, error.message);
           // Continue with next candle instead of breaking the entire backtest
         }
       }
@@ -170,7 +206,7 @@ export class BollingerFibonacciHybridBot {
       
       return results;
     } catch (error) {
-      console.error("Critical error in hybrid backtest:", error);
+      console.error("Critical error in hybrid backtest:", error.message);
       // Return empty results to prevent app crash
       return {
         totalTrades: 0,
@@ -237,6 +273,22 @@ export class BollingerFibonacciHybridBot {
     candles: Candle[]
   ): HybridSignal | null {
     try {
+      // Validate all inputs
+      if (!candle || !prevCandle || !band || !prevBand) {
+        return null;
+      }
+      
+      if (typeof candle.close !== 'number' || typeof prevCandle.close !== 'number' ||
+          isNaN(candle.close) || isNaN(prevCandle.close)) {
+        return null;
+      }
+      
+      if (typeof band.upper !== 'number' || typeof band.lower !== 'number' ||
+          typeof prevBand.upper !== 'number' || typeof prevBand.lower !== 'number' ||
+          isNaN(band.upper) || isNaN(band.lower) || isNaN(prevBand.upper) || isNaN(prevBand.lower)) {
+        return null;
+      }
+
       // Step 1: Check for Bollinger Band breakout
       const longBreakout = this.config.requireBollingerBreakout ? 
         (prevCandle.close <= prevBand.upper && candle.close > band.upper) : true;
@@ -253,7 +305,9 @@ export class BollingerFibonacciHybridBot {
 
       // Step 3: Volume confirmation
       const volumeConfirmation = this.config.requireVolumeConfirmation ? 
-        (volumeMA > 0 && candle.volume > volumeMA * this.config.volumeThreshold) : true;
+        (typeof volumeMA === 'number' && !isNaN(volumeMA) && volumeMA > 0 && 
+         typeof candle.volume === 'number' && !isNaN(candle.volume) && 
+         candle.volume > volumeMA * this.config.volumeThreshold) : true;
 
       // Step 4: Momentum confirmation (price action)
       const momentumConfirmationLong = this.config.requireMomentumConfirmation ? 
@@ -325,16 +379,19 @@ export class BollingerFibonacciHybridBot {
 
   private updateSwingPoints(candles: Candle[], currentIndex: number) {
     try {
-      // Clean up any null or undefined entries from swingPoints array first
-      this.swingPoints = this.swingPoints.filter(point => 
-        point !== null && 
-        point !== undefined && 
-        typeof point === 'object' && 
-        'type' in point && 
-        'price' in point && 
-        'index' in point && 
-        'timestamp' in point
-      );
+      // Robust validation function
+      const isValidSwingPoint = (p: any): p is SwingPoint => {
+        if (!p || typeof p !== 'object') return false;
+        if (!('type' in p) || !('price' in p) || !('index' in p) || !('timestamp' in p)) return false;
+        if (p.type !== 'high' && p.type !== 'low') return false;
+        if (typeof p.price !== 'number' || isNaN(p.price) || p.price <= 0) return false;
+        if (typeof p.index !== 'number' || isNaN(p.index) || p.index < 0) return false;
+        if (typeof p.timestamp !== 'number' || isNaN(p.timestamp)) return false;
+        return true;
+      };
+
+      // Clean up any invalid entries from swingPoints array first
+      this.swingPoints = this.swingPoints.filter(isValidSwingPoint);
 
       if (currentIndex < this.config.swingLookback * 2) return;
 
@@ -350,10 +407,12 @@ export class BollingerFibonacciHybridBot {
       // Check for swing high with proper bounds checking
       let isSwingHigh = true;
       for (let i = centerIndex - lookback; i <= centerIndex + lookback; i++) {
-        if (i === centerIndex || i < 0 || i >= candles.length) continue;
-        if (!candles[i]) continue;
+        if (i === centerIndex) continue;
+        if (i < 0 || i >= candles.length) continue;
+        const compareCandle = candles[i];
+        if (!compareCandle || typeof compareCandle.high !== 'number' || isNaN(compareCandle.high)) continue;
         
-        if (candles[i].high >= centerCandle.high) {
+        if (compareCandle.high >= centerCandle.high) {
           isSwingHigh = false;
           break;
         }
@@ -362,10 +421,12 @@ export class BollingerFibonacciHybridBot {
       // Check for swing low with proper bounds checking
       let isSwingLow = true;
       for (let i = centerIndex - lookback; i <= centerIndex + lookback; i++) {
-        if (i === centerIndex || i < 0 || i >= candles.length) continue;
-        if (!candles[i]) continue;
+        if (i === centerIndex) continue;
+        if (i < 0 || i >= candles.length) continue;
+        const compareCandle = candles[i];
+        if (!compareCandle || typeof compareCandle.low !== 'number' || isNaN(compareCandle.low)) continue;
         
-        if (candles[i].low <= centerCandle.low) {
+        if (compareCandle.low <= centerCandle.low) {
           isSwingLow = false;
           break;
         }
@@ -390,12 +451,10 @@ export class BollingerFibonacciHybridBot {
       }
 
       // Keep only recent swing points and filter out any null entries again
-      this.swingPoints = this.swingPoints.filter(point => 
-        point && 
-        point !== null && 
-        point !== undefined && 
-        currentIndex - point.index <= this.config.swingLookback * 10
-      );
+      this.swingPoints = this.swingPoints.filter(point => {
+        if (!isValidSwingPoint(point)) return false;
+        return currentIndex - point.index <= this.config.swingLookback * 10;
+      });
     } catch (error) {
       console.error("Error in updateSwingPoints:", error);
       // Ensure we always have a valid swingPoints array
@@ -409,30 +468,38 @@ export class BollingerFibonacciHybridBot {
     try {
       if (this.swingPoints.length < 2) return;
 
-      // Clean up any null or undefined entries from swingPoints array first
-      this.swingPoints = this.swingPoints.filter(point => 
-        point !== null && 
-        point !== undefined && 
-        typeof point === 'object' && 
-        'type' in point && 
-        'price' in point && 
-        'index' in point && 
-        'timestamp' in point
-      );
+      // Robust validation function
+      const isValidSwingPoint = (p: any): p is SwingPoint => {
+        if (!p || typeof p !== 'object') return false;
+        if (!('type' in p) || !('price' in p) || !('index' in p) || !('timestamp' in p)) return false;
+        if (p.type !== 'high' && p.type !== 'low') return false;
+        if (typeof p.price !== 'number' || isNaN(p.price) || p.price <= 0) return false;
+        if (typeof p.index !== 'number' || isNaN(p.index) || p.index < 0) return false;
+        if (typeof p.timestamp !== 'number' || isNaN(p.timestamp)) return false;
+        return true;
+      };
 
-      const recentHighs = this.swingPoints.filter(p => p && p.type === 'high').slice(-2);
-      const recentLows = this.swingPoints.filter(p => p && p.type === 'low').slice(-2);
+      // Clean up any invalid entries from swingPoints array first
+      this.swingPoints = this.swingPoints.filter(isValidSwingPoint);
+
+      const recentHighs = this.swingPoints.filter(p => p.type === 'high').slice(-2);
+      const recentLows = this.swingPoints.filter(p => p.type === 'low').slice(-2);
 
       if (recentHighs.length >= 1 && recentLows.length >= 1) {
         const lastHigh = recentHighs[recentHighs.length - 1];
         const lastLow = recentLows[recentLows.length - 1];
         
-        if (!lastHigh || !lastLow) return;
+        if (!isValidSwingPoint(lastHigh) || !isValidSwingPoint(lastLow)) return;
 
         // Calculate Fibonacci levels between the most recent swing high and low
         const high = Math.max(lastHigh.price, lastLow.price);
         const low = Math.min(lastHigh.price, lastLow.price);
         const range = high - low;
+
+        // Check for zero range to prevent division issues
+        if (Math.abs(range) < 0.0001) {
+          return;
+        }
 
         this.currentFibLevels = this.config.fibRetracementLevels.map(level => ({
           level,
@@ -465,14 +532,20 @@ export class BollingerFibonacciHybridBot {
   private isInGoldenZone(price: number, direction: 'long' | 'short'): boolean {
     try {
       if (!this.currentFibLevels || this.currentFibLevels.length === 0) return false;
-
-      const goldenZoneLow = this.currentFibLevels.find(l => 
-        l && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
-      );
       
-      const goldenZoneHigh = this.currentFibLevels.find(l => 
-        l && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
-      );
+      if (typeof price !== 'number' || isNaN(price) || price <= 0) return false;
+
+      const goldenZoneLow = this.currentFibLevels.find(l => {
+        if (!l || typeof l.level !== 'number' || typeof l.price !== 'number') return false;
+        if (isNaN(l.level) || isNaN(l.price)) return false;
+        return Math.abs(l.level - this.config.goldenZoneMin) < 0.001;
+      });
+      
+      const goldenZoneHigh = this.currentFibLevels.find(l => {
+        if (!l || typeof l.level !== 'number' || typeof l.price !== 'number') return false;
+        if (isNaN(l.level) || isNaN(l.price)) return false;
+        return Math.abs(l.level - this.config.goldenZoneMax) < 0.001;
+      });
 
       if (!goldenZoneLow || !goldenZoneHigh) return false;
 

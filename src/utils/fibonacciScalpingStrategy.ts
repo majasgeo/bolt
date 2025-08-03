@@ -184,16 +184,16 @@ export class FibonacciScalpingBot {
 
   private updateSwingPoints(candles: Candle[], currentIndex: number) {
     try {
-      // Clean up any null or undefined entries from swingPoints array first
-      this.swingPoints = this.swingPoints.filter(point => 
-        point !== null && 
-        point !== undefined && 
-        typeof point === 'object' && 
-        'type' in point && 
-        'price' in point && 
-        'index' in point && 
-        'timestamp' in point
-      );
+      // Robust filtering to remove all invalid entries
+      this.swingPoints = this.swingPoints.filter(point => {
+        if (!point || typeof point !== 'object') return false;
+        if (!('type' in point) || !('price' in point) || !('index' in point) || !('timestamp' in point)) return false;
+        if (point.type !== 'high' && point.type !== 'low') return false;
+        if (typeof point.price !== 'number' || isNaN(point.price) || point.price <= 0) return false;
+        if (typeof point.index !== 'number' || isNaN(point.index) || point.index < 0) return false;
+        if (typeof point.timestamp !== 'number' || isNaN(point.timestamp)) return false;
+        return true;
+      });
 
       if (currentIndex < this.config.swingLookback * 2) return;
 
@@ -209,10 +209,12 @@ export class FibonacciScalpingBot {
       // Check for swing high with proper bounds checking
       let isSwingHigh = true;
       for (let i = centerIndex - lookback; i <= centerIndex + lookback; i++) {
-        if (i === centerIndex || i < 0 || i >= candles.length) continue;
-        if (!candles[i]) continue;
+        if (i === centerIndex) continue;
+        if (i < 0 || i >= candles.length) continue;
+        const compareCandle = candles[i];
+        if (!compareCandle || typeof compareCandle.high !== 'number' || isNaN(compareCandle.high)) continue;
         
-        if (candles[i].high >= centerCandle.high) {
+        if (compareCandle.high >= centerCandle.high) {
           isSwingHigh = false;
           break;
         }
@@ -221,10 +223,12 @@ export class FibonacciScalpingBot {
       // Check for swing low with proper bounds checking
       let isSwingLow = true;
       for (let i = centerIndex - lookback; i <= centerIndex + lookback; i++) {
-        if (i === centerIndex || i < 0 || i >= candles.length) continue;
-        if (!candles[i]) continue;
+        if (i === centerIndex) continue;
+        if (i < 0 || i >= candles.length) continue;
+        const compareCandle = candles[i];
+        if (!compareCandle || typeof compareCandle.low !== 'number' || isNaN(compareCandle.low)) continue;
         
-        if (candles[i].low <= centerCandle.low) {
+        if (compareCandle.low <= centerCandle.low) {
           isSwingLow = false;
           break;
         }
@@ -249,12 +253,11 @@ export class FibonacciScalpingBot {
       }
 
       // Keep only recent swing points and filter out any null entries again
-      this.swingPoints = this.swingPoints.filter(point => 
-        point && 
-        point !== null && 
-        point !== undefined && 
-        currentIndex - point.index <= this.config.swingLookback * 10
-      );
+      this.swingPoints = this.swingPoints.filter(point => {
+        if (!point || typeof point !== 'object') return false;
+        if (typeof point.index !== 'number' || isNaN(point.index)) return false;
+        return currentIndex - point.index <= this.config.swingLookback * 10;
+      });
     } catch (error) {
       console.error("Error in updateSwingPoints:", error);
       // Ensure we always have a valid swingPoints array
@@ -266,42 +269,34 @@ export class FibonacciScalpingBot {
 
   private checkStructureBreak(candles: Candle[], currentIndex: number) {
     try {
+      // Robust validation function
+      const isValidSwingPoint = (p: any): p is SwingPoint => {
+        if (!p || typeof p !== 'object') return false;
+        if (!('type' in p) || !('price' in p) || !('index' in p) || !('timestamp' in p)) return false;
+        if (p.type !== 'high' && p.type !== 'low') return false;
+        if (typeof p.price !== 'number' || isNaN(p.price) || p.price <= 0) return false;
+        if (typeof p.index !== 'number' || isNaN(p.index) || p.index < 0) return false;
+        if (typeof p.timestamp !== 'number' || isNaN(p.timestamp)) return false;
+        return true;
+      };
+
       // Clean swing points array before processing
-      this.swingPoints = this.swingPoints.filter(point => 
-        point !== null && 
-        point !== undefined && 
-        typeof point === 'object' && 
-        'type' in point && 
-        'price' in point && 
-        'index' in point && 
-        'timestamp' in point
-      );
+      this.swingPoints = this.swingPoints.filter(isValidSwingPoint);
 
       if (this.swingPoints.length < 2) return;
 
       const currentCandle = candles[currentIndex];
       if (!currentCandle) return;
       
-      // Enhanced type guard for swing points filtering with explicit null checks
-      const isValidSwingPoint = (p: SwingPoint | null | undefined): p is SwingPoint => {
-        return p !== null && p !== undefined && 
-              typeof p === 'object' && 
-              'type' in p && 
-              'price' in p && 
-              'index' in p && 
-              'timestamp' in p &&
-              (p.type === 'high' || p.type === 'low');
-      };
-
-      // Fix: Add explicit null check before accessing 'type' property
+      // Filter and slice with validation
       const recentSwingHighs = this.swingPoints
         .filter(isValidSwingPoint)
-        .filter(p => p && p.type === 'high')
+        .filter(p => p.type === 'high')
         .slice(-3);
         
       const recentSwingLows = this.swingPoints
         .filter(isValidSwingPoint)
-        .filter(p => p && p.type === 'low')
+        .filter(p => p.type === 'low')
         .slice(-3);
 
       // Check for uptrend structure break (break of last swing high)
@@ -309,7 +304,8 @@ export class FibonacciScalpingBot {
         const lastSwingHigh = recentSwingHighs[recentSwingHighs.length - 1];
         const lastSwingLow = recentSwingLows[recentSwingLows.length - 1];
         
-        if (!lastSwingHigh || !lastSwingLow) return;
+        // Explicit null checks with validation
+        if (!isValidSwingPoint(lastSwingHigh) || !isValidSwingPoint(lastSwingLow)) return;
 
         // Structure break to upside
         if (currentCandle.close > lastSwingHigh.price && 
@@ -347,9 +343,23 @@ export class FibonacciScalpingBot {
     direction: 'uptrend' | 'downtrend'
   ): FibonacciRetracement {
     try {
+      // Validate input points
+      if (!point1 || !point2 || typeof point1.price !== 'number' || typeof point2.price !== 'number') {
+        throw new Error('Invalid swing points provided');
+      }
+      
+      if (isNaN(point1.price) || isNaN(point2.price) || point1.price <= 0 || point2.price <= 0) {
+        throw new Error('Invalid price values in swing points');
+      }
+
       const high = direction === 'uptrend' ? point2 : point1;
       const low = direction === 'uptrend' ? point1 : point2;
       const range = high.price - low.price;
+
+      // Check for zero range to prevent division issues
+      if (Math.abs(range) < 0.0001) {
+        throw new Error('Price range too small for Fibonacci calculation');
+      }
 
       const levels: FibonacciLevel[] = this.config.fibRetracementLevels.map(level => ({
         level,
@@ -396,14 +406,23 @@ export class FibonacciScalpingBot {
         return false;
       }
 
-      // Check if price is in golden zone with proper null checks
-      const goldenZoneLow = this.currentFibRetracement.levels.find(l => 
-        l && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
-      );
+      // Validate levels array
+      if (!this.currentFibRetracement.levels || !Array.isArray(this.currentFibRetracement.levels)) {
+        return false;
+      }
+
+      // Check if price is in golden zone with validation
+      const goldenZoneLow = this.currentFibRetracement.levels.find(l => {
+        if (!l || typeof l.level !== 'number' || typeof l.price !== 'number') return false;
+        if (isNaN(l.level) || isNaN(l.price)) return false;
+        return Math.abs(l.level - this.config.goldenZoneMin) < 0.001;
+      });
       
-      const goldenZoneHigh = this.currentFibRetracement.levels.find(l => 
-        l && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
-      );
+      const goldenZoneHigh = this.currentFibRetracement.levels.find(l => {
+        if (!l || typeof l.level !== 'number' || typeof l.price !== 'number') return false;
+        if (isNaN(l.level) || isNaN(l.price)) return false;
+        return Math.abs(l.level - this.config.goldenZoneMax) < 0.001;
+      });
       
       if (!goldenZoneLow || !goldenZoneHigh) return false;
 
@@ -437,14 +456,23 @@ export class FibonacciScalpingBot {
         return false;
       }
 
-      // Check if price is in golden zone with proper null checks
-      const goldenZoneLow = this.currentFibRetracement.levels.find(l => 
-        l && Math.abs(l.level - this.config.goldenZoneMin) < 0.001
-      );
+      // Validate levels array
+      if (!this.currentFibRetracement.levels || !Array.isArray(this.currentFibRetracement.levels)) {
+        return false;
+      }
+
+      // Check if price is in golden zone with validation
+      const goldenZoneLow = this.currentFibRetracement.levels.find(l => {
+        if (!l || typeof l.level !== 'number' || typeof l.price !== 'number') return false;
+        if (isNaN(l.level) || isNaN(l.price)) return false;
+        return Math.abs(l.level - this.config.goldenZoneMin) < 0.001;
+      });
       
-      const goldenZoneHigh = this.currentFibRetracement.levels.find(l => 
-        l && Math.abs(l.level - this.config.goldenZoneMax) < 0.001
-      );
+      const goldenZoneHigh = this.currentFibRetracement.levels.find(l => {
+        if (!l || typeof l.level !== 'number' || typeof l.price !== 'number') return false;
+        if (isNaN(l.level) || isNaN(l.price)) return false;
+        return Math.abs(l.level - this.config.goldenZoneMax) < 0.001;
+      });
       
       if (!goldenZoneLow || !goldenZoneHigh) return false;
 
@@ -475,14 +503,26 @@ export class FibonacciScalpingBot {
   private shouldExitOnFibonacci(candle: Candle): boolean {
     try {
       if (!this.currentTrade || !this.currentFibRetracement) return false;
+      
+      if (!this.currentFibRetracement.levels || !Array.isArray(this.currentFibRetracement.levels)) {
+        return false;
+      }
 
       if (this.currentTrade.position === 'long') {
         // Exit when price reaches previous swing high or 100% Fibonacci level
-        const targetLevel = this.currentFibRetracement.levels.find(l => l && Math.abs(l.level - 0) < 0.001); // 0% = swing high
+        const targetLevel = this.currentFibRetracement.levels.find(l => {
+          if (!l || typeof l.level !== 'number' || typeof l.price !== 'number') return false;
+          if (isNaN(l.level) || isNaN(l.price)) return false;
+          return Math.abs(l.level - 0) < 0.001; // 0% = swing high
+        });
         return targetLevel ? candle.high >= targetLevel.price : false;
       } else {
         // Exit when price reaches previous swing low or 100% Fibonacci level
-        const targetLevel = this.currentFibRetracement.levels.find(l => l && Math.abs(l.level - 0) < 0.001); // 0% = swing low
+        const targetLevel = this.currentFibRetracement.levels.find(l => {
+          if (!l || typeof l.level !== 'number' || typeof l.price !== 'number') return false;
+          if (isNaN(l.level) || isNaN(l.price)) return false;
+          return Math.abs(l.level - 0) < 0.001; // 0% = swing low
+        });
         return targetLevel ? candle.low <= targetLevel.price : false;
       }
     } catch (error) {

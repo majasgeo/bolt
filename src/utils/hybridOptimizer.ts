@@ -56,6 +56,11 @@ export class HybridOptimizer {
     this.startTime = Date.now();
     const results: HybridOptimizationResult[] = [];
     
+    // Validate input data
+    if (!this.candles || !Array.isArray(this.candles) || this.candles.length === 0) {
+      throw new Error("Invalid candles data for optimization");
+    }
+    
     // Parameter ranges for hybrid optimization
     const bollingerPeriods = [12, 15, 18, 20, 22, 25]; // Optimized for 1-minute
     const stdDevValues = [1.8, 2.0, 2.2, 2.5]; // Tighter range for scalping
@@ -164,11 +169,34 @@ export class HybridOptimizer {
                             }
 
                             try {
+                              // Validate bands calculation
                               const bands = calculateBollingerBands(this.candles, period, stdDev, offset);
+                              if (!bands || !Array.isArray(bands) || bands.length === 0) {
+                                console.warn(`Failed to calculate bands for config: ${currentConfigStr}`);
+                                continue;
+                              }
+                              
+                              if (bands.length !== this.candles.length) {
+                                console.warn(`Bands length mismatch for config: ${currentConfigStr}`);
+                                continue;
+                              }
+                              
                               const hybridBot = new BollingerFibonacciHybridBot(config);
                               const backtestResult = hybridBot.backtest(this.candles, bands);
+                              
+                              // Validate backtest result
+                              if (!backtestResult || typeof backtestResult.totalTrades !== 'number') {
+                                console.warn(`Invalid backtest result for config: ${currentConfigStr}`);
+                                continue;
+                              }
 
                               const totalReturn = config.initialCapital > 0 ? backtestResult.totalPnL / config.initialCapital : 0;
+                              
+                              // Validate return calculation
+                              if (typeof totalReturn !== 'number' || isNaN(totalReturn)) {
+                                console.warn(`Invalid return calculation for config: ${currentConfigStr}`);
+                                continue;
+                              }
                               
                               // Apply filters before adding to results
                               if (this.passesFilters(backtestResult, totalReturn, filters)) {
@@ -228,9 +256,16 @@ export class HybridOptimizer {
                               if (currentTest % 100 === 0) {
                                 await new Promise(resolve => setTimeout(resolve, 1));
                               }
+                              
+                              // Safety check to prevent infinite loops
+                              if (currentTest > totalCombinations) {
+                                console.error("Optimization loop exceeded expected iterations");
+                                break;
+                              }
 
                             } catch (error) {
-                              console.warn(`Failed hybrid test: ${currentConfigStr}`, error);
+                              console.warn(`Failed hybrid test: ${currentConfigStr}`, error.message);
+                              // Continue to next iteration instead of breaking
                             }
                           }
                         }
